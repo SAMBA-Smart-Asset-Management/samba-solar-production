@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solar Forecast Bron",
+        "description": "Voer het sensorprefix in voor je solar forecast sensoren. Deze sensoren moeten suffixen hebben zoals _today, _tomorrow, _d2 etc. en een 'watts' attribuut bevatten.",
+        "data": {
+          "solar_forecast_prefix": "Solar forecast sensor prefix"
+        }
+      },
+      "inverter": {
+        "title": "Omvormer {inverter_num}",
+        "description": "Configureer je omvormer. Geef minimaal \u00e9\u00e9n besturingsentiteit op (aan/uit schakelaar of vermogensregeling).",
+        "data": {
+          "inverter_name": "Naam omvormer",
+          "inverter_on_entity": "Inschakelen entiteit (switch/script/button)",
+          "inverter_off_entity": "Uitschakelen entiteit (switch/script/button)",
+          "inverter_power_control_entity": "Vermogensregeling entiteit (number, voor power limiting)",
+          "inverter_power_sensor": "Vermogen monitoring sensor (W)",
+          "inverter_rated_power_w": "Nominaal vermogen (W)"
+        }
+      },
+      "add_another": {
+        "title": "Nog een omvormer toevoegen?",
+        "description": "Je hebt {inverter_count} omvormer(s) geconfigureerd: {inverters_list}",
+        "data": {
+          "add_another": "Nog een omvormer toevoegen"
+        }
+      },
+      "energy_core": {
+        "title": "Energy Core",
+        "description": "Selecteer de Energy Core instantie.",
+        "data": {
+          "energy_core_entry": "Energy Core instantie"
+        }
+      }
+    },
+    "error": {
+      "empty_prefix": "Voer een sensor prefix in",
+      "empty_inverter_name": "Voer een omvormernaam in",
+      "no_control_entity": "Minimaal \u00e9\u00e9n besturingsentiteit (aan/uit of vermogen) is vereist",
+      "energy_core_required": "Energy Core integratie is vereist"
+    },
+    "abort": {
+      "energy_core_required": "Energy Core integratie moet eerst ge\u00efnstalleerd en geconfigureerd worden"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "edit_prefix": "Solar forecast prefix bewerken",
+          "add_inverter": "Omvormer toevoegen",
+          "remove_inverter": "Omvormer verwijderen"
+        }
+      }
+    }
+  }
+}

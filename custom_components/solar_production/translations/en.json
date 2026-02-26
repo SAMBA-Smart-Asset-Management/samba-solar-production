@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Solar Forecast Source",
+        "description": "Enter the sensor prefix for your solar forecast sensors. These sensors should have suffixes like _today, _tomorrow, _d2 etc. and provide a 'watts' attribute.",
+        "data": {
+          "solar_forecast_prefix": "Solar forecast sensor prefix"
+        }
+      },
+      "inverter": {
+        "title": "Inverter {inverter_num}",
+        "description": "Configure your inverter. Provide at least one control entity (on/off switch or power control number).",
+        "data": {
+          "inverter_name": "Inverter name",
+          "inverter_on_entity": "Turn on entity (switch/script/button)",
+          "inverter_off_entity": "Turn off entity (switch/script/button)",
+          "inverter_power_control_entity": "Power control entity (number, for power limiting)",
+          "inverter_power_sensor": "Power monitoring sensor (W)",
+          "inverter_rated_power_w": "Rated power (W)"
+        }
+      },
+      "add_another": {
+        "title": "Add another inverter?",
+        "description": "You have configured {inverter_count} inverter(s): {inverters_list}",
+        "data": {
+          "add_another": "Add another inverter"
+        }
+      },
+      "energy_core": {
+        "title": "Energy Core",
+        "description": "Select the Energy Core instance to use.",
+        "data": {
+          "energy_core_entry": "Energy Core instance"
+        }
+      }
+    },
+    "error": {
+      "empty_prefix": "Please enter a sensor prefix",
+      "empty_inverter_name": "Please enter an inverter name",
+      "no_control_entity": "At least one control entity (on/off or power) is required",
+      "energy_core_required": "Energy Core integration is required"
+    },
+    "abort": {
+      "energy_core_required": "Energy Core integration must be installed and configured first"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "edit_prefix": "Edit solar forecast prefix",
+          "add_inverter": "Add inverter",
+          "remove_inverter": "Remove inverter"
+        }
+      }
+    }
+  }
+}
