@@ -12,6 +12,8 @@ from .const import (
     CONF_INVERTER_OFF_ENTITY,
     CONF_INVERTER_POWER_ENTITY,
     CONF_INVERTER_RATED_POWER_W,
+    CONF_GLOBAL_ON_ENTITY,
+    CONF_GLOBAL_OFF_ENTITY,
     MODE_FULL_PRODUCTION,
     MODE_SELF_CONSUMPTION,
     MODE_NO_NEGATIVE_PRICES,
@@ -250,19 +252,30 @@ async def execute_action(
     hass: HomeAssistant,
     inv_config: dict[str, Any],
     action: InverterAction,
+    global_config: dict[str, Any] | None = None,
 ) -> None:
-    """Execute an inverter control action."""
+    """Execute an inverter control action.
+
+    Falls back to global on/off entities when the inverter has no
+    dedicated on/off entity configured.
+    """
+    global_config = global_config or {}
+
     if action.action == "turn_on":
-        entity_id = inv_config.get(CONF_INVERTER_ON_ENTITY)
+        entity_id = inv_config.get(CONF_INVERTER_ON_ENTITY) or global_config.get(CONF_GLOBAL_ON_ENTITY)
         if entity_id:
             await _call_entity_action(hass, entity_id)
-            _LOGGER.info("Inverter ON: %s", action.reason)
+            _LOGGER.info("Inverter ON via %s: %s", entity_id, action.reason)
+        else:
+            _LOGGER.warning("Inverter ON requested but no on entity configured (individual or global)")
 
     elif action.action == "turn_off":
-        entity_id = inv_config.get(CONF_INVERTER_OFF_ENTITY)
+        entity_id = inv_config.get(CONF_INVERTER_OFF_ENTITY) or global_config.get(CONF_GLOBAL_OFF_ENTITY)
         if entity_id:
             await _call_entity_action(hass, entity_id)
-            _LOGGER.info("Inverter OFF: %s", action.reason)
+            _LOGGER.info("Inverter OFF via %s: %s", entity_id, action.reason)
+        else:
+            _LOGGER.warning("Inverter OFF requested but no off entity configured (individual or global)")
 
     elif action.action == "set_power":
         entity_id = inv_config.get(CONF_INVERTER_POWER_ENTITY)
@@ -277,6 +290,8 @@ async def execute_action(
                 "Inverter power set to %.0fW: %s",
                 action.target_power_w, action.reason,
             )
+        else:
+            _LOGGER.warning("Inverter set_power requested but no power control entity configured")
 
 
 async def _call_entity_action(hass: HomeAssistant, entity_id: str) -> None:

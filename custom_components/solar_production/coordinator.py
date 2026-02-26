@@ -18,6 +18,8 @@ from .const import (
     CONF_INVERTER_NAME,
     CONF_INVERTER_POWER_SENSOR,
     CONF_INVERTER_RATED_POWER_W,
+    CONF_GLOBAL_ON_ENTITY,
+    CONF_GLOBAL_OFF_ENTITY,
     FORECAST_DAY_SUFFIXES,
     UPDATE_INTERVAL_SECONDS,
     INVERTER_EVAL_SECONDS,
@@ -443,7 +445,11 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
             )
 
             if action:
-                await execute_action(self.hass, inv_config, action)
+                global_config = {
+                    CONF_GLOBAL_ON_ENTITY: self.entry.data.get(CONF_GLOBAL_ON_ENTITY),
+                    CONF_GLOBAL_OFF_ENTITY: self.entry.data.get(CONF_GLOBAL_OFF_ENTITY),
+                }
+                await execute_action(self.hass, inv_config, action, global_config)
                 inv_status.last_action = action.action
                 inv_status.last_action_reason = action.reason
                 inv_status.is_on = action.action != "turn_off"

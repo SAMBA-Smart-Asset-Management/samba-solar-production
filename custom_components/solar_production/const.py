@@ -37,6 +37,10 @@ CONF_INVERTER_POWER_ENTITY = "inverter_power_control_entity"
 CONF_INVERTER_POWER_SENSOR = "inverter_power_sensor"
 CONF_INVERTER_RATED_POWER_W = "inverter_rated_power_w"
 
+# Global fallback switch (used when individual inverter has no on/off entity)
+CONF_GLOBAL_ON_ENTITY = "global_on_entity"
+CONF_GLOBAL_OFF_ENTITY = "global_off_entity"
+
 # ---------------------------------------------------------------------------
 # Config keys – Energy Core
 # ---------------------------------------------------------------------------

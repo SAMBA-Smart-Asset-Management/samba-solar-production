@@ -2,22 +2,33 @@
   "config": {
     "step": {
       "user": {
-        "title": "Solar Forecast Bron",
-        "description": "Voer het sensorprefix in voor je solar forecast sensoren. Deze sensoren moeten suffixen hebben zoals _today, _tomorrow, _d2 etc. en een 'watts' attribuut bevatten.",
+        "title": "Solar Forecast & Algemene Schakelaar",
+        "description": "Voer het sensorprefix in voor je solar forecast sensoren. Deze sensoren moeten suffixen hebben zoals _today, _tomorrow, _d2 etc. en een 'watts' attribuut bevatten.\n\nOptioneel kun je een algemene schakelaar instellen. Deze wordt als fallback gebruikt voor omvormers waarvoor je geen eigen schakelaar configureert. Handig als je \u00e9\u00e9n centrale schakelaar hebt die meerdere omvormers tegelijk bedient.",
         "data": {
-          "solar_forecast_prefix": "Solar forecast sensor prefix"
+          "solar_forecast_prefix": "Solar forecast sensor prefix",
+          "global_on_entity": "Algemene inschakelen schakelaar (fallback)",
+          "global_off_entity": "Algemene uitschakelen schakelaar (fallback)"
+        },
+        "data_description": {
+          "global_on_entity": "Optioneel. Wordt gebruikt als fallback voor omvormers zonder eigen inschakelen entiteit.",
+          "global_off_entity": "Optioneel. Wordt gebruikt als fallback voor omvormers zonder eigen uitschakelen entiteit."
         }
       },
       "inverter": {
         "title": "Omvormer {inverter_num}",
-        "description": "Configureer je omvormer. Geef minimaal \u00e9\u00e9n besturingsentiteit op (aan/uit schakelaar of vermogensregeling).",
+        "description": "Configureer je omvormer. Laat de schakelaar velden leeg om de algemene schakelaar (fallback) te gebruiken die je in de vorige stap hebt ingesteld. Vul ze in om een specifieke schakelaar voor deze omvormer te gebruiken.",
         "data": {
           "inverter_name": "Naam omvormer",
-          "inverter_on_entity": "Inschakelen entiteit (switch/script/button)",
-          "inverter_off_entity": "Uitschakelen entiteit (switch/script/button)",
+          "inverter_on_entity": "Inschakelen entiteit",
+          "inverter_off_entity": "Uitschakelen entiteit",
           "inverter_power_control_entity": "Vermogensregeling entiteit (number, voor power limiting)",
           "inverter_power_sensor": "Vermogen monitoring sensor (W)",
           "inverter_rated_power_w": "Nominaal vermogen (W)"
+        },
+        "data_description": {
+          "inverter_on_entity": "Optioneel. Laat leeg om de algemene schakelaar te gebruiken als die is ingesteld.",
+          "inverter_off_entity": "Optioneel. Laat leeg om de algemene schakelaar te gebruiken als die is ingesteld.",
+          "inverter_power_control_entity": "Optioneel. Alleen nodig voor omvormers die vermogen kunnen beperken (moduleerbaar)."
         }
       },
       "add_another": {
@@ -38,7 +49,7 @@
     "error": {
       "empty_prefix": "Voer een sensor prefix in",
       "empty_inverter_name": "Voer een omvormernaam in",
-      "no_control_entity": "Minimaal \u00e9\u00e9n besturingsentiteit (aan/uit of vermogen) is vereist",
+      "no_control_entity": "Minimaal \u00e9\u00e9n besturingsentiteit is vereist (eigen schakelaar of vermogensregeling, of stel een algemene schakelaar in bij de vorige stap)",
       "energy_core_required": "Energy Core integratie is vereist"
     },
     "abort": {
@@ -50,8 +61,17 @@
       "init": {
         "menu_options": {
           "edit_prefix": "Solar forecast prefix bewerken",
+          "edit_global_switch": "Algemene schakelaar bewerken",
           "add_inverter": "Omvormer toevoegen",
           "remove_inverter": "Omvormer verwijderen"
+        }
+      },
+      "edit_global_switch": {
+        "title": "Algemene Schakelaar",
+        "description": "Stel een algemene schakelaar in die als fallback wordt gebruikt voor omvormers zonder eigen schakelaar.",
+        "data": {
+          "global_on_entity": "Algemene inschakelen schakelaar",
+          "global_off_entity": "Algemene uitschakelen schakelaar"
         }
       }
     }

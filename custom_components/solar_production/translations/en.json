@@ -2,22 +2,33 @@
   "config": {
     "step": {
       "user": {
-        "title": "Solar Forecast Source",
-        "description": "Enter the sensor prefix for your solar forecast sensors. These sensors should have suffixes like _today, _tomorrow, _d2 etc. and provide a 'watts' attribute.",
+        "title": "Solar Forecast & Global Switch",
+        "description": "Enter the sensor prefix for your solar forecast sensors. These sensors should have suffixes like _today, _tomorrow, _d2 etc. and provide a 'watts' attribute.\n\nOptionally set a global switch. This is used as a fallback for inverters that don't have their own switch configured. Useful when you have one central switch controlling multiple inverters.",
         "data": {
-          "solar_forecast_prefix": "Solar forecast sensor prefix"
+          "solar_forecast_prefix": "Solar forecast sensor prefix",
+          "global_on_entity": "Global turn-on switch (fallback)",
+          "global_off_entity": "Global turn-off switch (fallback)"
+        },
+        "data_description": {
+          "global_on_entity": "Optional. Used as fallback for inverters without their own turn-on entity.",
+          "global_off_entity": "Optional. Used as fallback for inverters without their own turn-off entity."
         }
       },
       "inverter": {
         "title": "Inverter {inverter_num}",
-        "description": "Configure your inverter. Provide at least one control entity (on/off switch or power control number).",
+        "description": "Configure your inverter. Leave the switch fields empty to use the global switch (fallback) configured in the previous step. Fill them in to use a specific switch for this inverter.",
         "data": {
           "inverter_name": "Inverter name",
-          "inverter_on_entity": "Turn on entity (switch/script/button)",
-          "inverter_off_entity": "Turn off entity (switch/script/button)",
+          "inverter_on_entity": "Turn on entity",
+          "inverter_off_entity": "Turn off entity",
           "inverter_power_control_entity": "Power control entity (number, for power limiting)",
           "inverter_power_sensor": "Power monitoring sensor (W)",
           "inverter_rated_power_w": "Rated power (W)"
+        },
+        "data_description": {
+          "inverter_on_entity": "Optional. Leave empty to use the global switch if configured.",
+          "inverter_off_entity": "Optional. Leave empty to use the global switch if configured.",
+          "inverter_power_control_entity": "Optional. Only needed for inverters that support power limiting (modulatable)."
         }
       },
       "add_another": {
@@ -38,7 +49,7 @@
     "error": {
       "empty_prefix": "Please enter a sensor prefix",
       "empty_inverter_name": "Please enter an inverter name",
-      "no_control_entity": "At least one control entity (on/off or power) is required",
+      "no_control_entity": "At least one control entity is required (own switch or power control, or set a global switch in the previous step)",
       "energy_core_required": "Energy Core integration is required"
     },
     "abort": {
@@ -50,8 +61,17 @@
       "init": {
         "menu_options": {
           "edit_prefix": "Edit solar forecast prefix",
+          "edit_global_switch": "Edit global switch",
           "add_inverter": "Add inverter",
           "remove_inverter": "Remove inverter"
+        }
+      },
+      "edit_global_switch": {
+        "title": "Global Switch",
+        "description": "Set a global switch used as fallback for inverters without their own switch.",
+        "data": {
+          "global_on_entity": "Global turn-on switch",
+          "global_off_entity": "Global turn-off switch"
         }
       }
     }

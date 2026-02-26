@@ -22,6 +22,8 @@ from .const import (
     CONF_INVERTER_POWER_SENSOR,
     CONF_INVERTER_RATED_POWER_W,
     CONF_ENERGY_CORE_ENTRY,
+    CONF_GLOBAL_ON_ENTITY,
+    CONF_GLOBAL_OFF_ENTITY,
     DEFAULT_SOLAR_FORECAST_PREFIX,
 )
 
@@ -45,6 +47,8 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._solar_prefix: str = DEFAULT_SOLAR_FORECAST_PREFIX
         self._inverters: list[dict[str, Any]] = []
         self._energy_core_entry: str | None = None
+        self._global_on_entity: str | None = None
+        self._global_off_entity: str | None = None
 
     @staticmethod
     @callback
@@ -75,7 +79,7 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 1: Solar forecast source configuration."""
+        """Step 1: Solar forecast source and global switch configuration."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -98,6 +102,8 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
 
                 self._solar_prefix = prefix
+                self._global_on_entity = user_input.get(CONF_GLOBAL_ON_ENTITY)
+                self._global_off_entity = user_input.get(CONF_GLOBAL_OFF_ENTITY)
                 return await self.async_step_inverter()
 
         detected_prefix = self._detect_solar_prefix()
@@ -110,6 +116,16 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_SOLAR_FORECAST_PREFIX,
                         default=detected_prefix,
                     ): selector.TextSelector(),
+                    vol.Optional(CONF_GLOBAL_ON_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain=["switch", "script", "button", "input_button"],
+                        )
+                    ),
+                    vol.Optional(CONF_GLOBAL_OFF_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain=["switch", "script", "button", "input_button"],
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -127,9 +143,12 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             off_entity = user_input.get(CONF_INVERTER_OFF_ENTITY)
             power_entity = user_input.get(CONF_INVERTER_POWER_ENTITY)
 
+            has_own_control = on_entity or off_entity or power_entity
+            has_global_fallback = self._global_on_entity or self._global_off_entity
+
             if not name:
                 errors[CONF_INVERTER_NAME] = "empty_inverter_name"
-            elif not on_entity and not off_entity and not power_entity:
+            elif not has_own_control and not has_global_fallback:
                 errors["base"] = "no_control_entity"
             else:
                 inverter_data = {
@@ -248,6 +267,8 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_SOLAR_FORECAST_PREFIX: self._solar_prefix,
             CONF_INVERTERS: self._inverters,
             CONF_ENERGY_CORE_ENTRY: self._energy_core_entry,
+            CONF_GLOBAL_ON_ENTITY: self._global_on_entity,
+            CONF_GLOBAL_OFF_ENTITY: self._global_off_entity,
         }
         return self.async_create_entry(title="Solar Production", data=data)
 
@@ -267,7 +288,54 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
         """Manage the options."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["edit_prefix", "add_inverter", "remove_inverter"],
+            menu_options=["edit_prefix", "edit_global_switch", "add_inverter", "remove_inverter"],
+        )
+
+    async def async_step_edit_global_switch(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Edit the global fallback switch."""
+        if user_input is not None:
+            new_data = dict(self.config_entry.data)
+            new_data[CONF_GLOBAL_ON_ENTITY] = user_input.get(CONF_GLOBAL_ON_ENTITY)
+            new_data[CONF_GLOBAL_OFF_ENTITY] = user_input.get(CONF_GLOBAL_OFF_ENTITY)
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data
+            )
+            return self.async_create_entry(title="", data={})
+
+        current_on = self.config_entry.data.get(CONF_GLOBAL_ON_ENTITY)
+        current_off = self.config_entry.data.get(CONF_GLOBAL_OFF_ENTITY)
+
+        schema = {}
+        if current_on:
+            schema[vol.Optional(CONF_GLOBAL_ON_ENTITY, default=current_on)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "script", "button", "input_button"],
+                )
+            )
+        else:
+            schema[vol.Optional(CONF_GLOBAL_ON_ENTITY)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "script", "button", "input_button"],
+                )
+            )
+        if current_off:
+            schema[vol.Optional(CONF_GLOBAL_OFF_ENTITY, default=current_off)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "script", "button", "input_button"],
+                )
+            )
+        else:
+            schema[vol.Optional(CONF_GLOBAL_OFF_ENTITY)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "script", "button", "input_button"],
+                )
+            )
+
+        return self.async_show_form(
+            step_id="edit_global_switch",
+            data_schema=vol.Schema(schema),
         )
 
     async def async_step_edit_prefix(
@@ -306,9 +374,15 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
             off_entity = user_input.get(CONF_INVERTER_OFF_ENTITY)
             power_entity = user_input.get(CONF_INVERTER_POWER_ENTITY)
 
+            has_own_control = on_entity or off_entity or power_entity
+            has_global_fallback = (
+                self.config_entry.data.get(CONF_GLOBAL_ON_ENTITY)
+                or self.config_entry.data.get(CONF_GLOBAL_OFF_ENTITY)
+            )
+
             if not name:
                 errors[CONF_INVERTER_NAME] = "empty_inverter_name"
-            elif not on_entity and not off_entity and not power_entity:
+            elif not has_own_control and not has_global_fallback:
                 errors["base"] = "no_control_entity"
             else:
                 inverter_data = {
