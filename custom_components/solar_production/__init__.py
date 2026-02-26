@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from homeassistant.components.frontend import async_register_built_in_panel
-from homeassistant.components.panel_custom import async_register_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -30,8 +28,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         hass.http.register_static_path(PANEL_URL, str(panel_path), cache_headers=False)
         _LOGGER.debug("Registered static path for solar production panel")
 
-        # Register the sidebar panel
+        # Register the sidebar panel (lazy import to avoid load-time errors)
         try:
+            from homeassistant.components.panel_custom import async_register_panel
+
             await async_register_panel(
                 hass,
                 frontend_url_path="solar-production",

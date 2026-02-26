@@ -4,6 +4,7 @@
   "codeowners": ["@Leonsturkenboom"],
   "config_flow": true,
   "dependencies": ["energy_core"],
+  "after_dependencies": ["panel_custom", "frontend"],
   "documentation": "https://github.com/SAMBA-Smart-Asset-Management/samba-solar-production",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/SAMBA-Smart-Asset-Management/samba-solar-production/issues",
