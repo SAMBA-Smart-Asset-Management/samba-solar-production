@@ -129,3 +129,34 @@ After changes to `solar-dashboard/src/`, rebuild and copy the output.
 
 ## Learnings
 > Add new patterns, bug fixes, or architecture decisions here with date.
+
+
+## Dashboard Versioning Convention (IMPORTANT)
+All SAMBA integrations that ship a frontend panel MUST apply **cache busting**:
+1. Store the panel JS file inside the integration directory (ships with HACS).
+2. On setup, `__init__.py` copies the JS to `/config/www/` and registers the panel with a `?v={VERSION}` query string.
+3. `VERSION` is defined in `const.py` and MUST be bumped on every dashboard change.
+4. The Vite build config should include a `copyToIntegration()` plugin that copies the bundle into the integration directory automatically.
+
+### Registration pattern:
+```python
+import shutil
+from pathlib import Path
+from homeassistant.components.panel_custom import async_register_panel
+
+src = Path(__file__).parent / "my-panel.js"
+www_dir = Path(hass.config.path("www"))
+www_dir.mkdir(exist_ok=True)
+shutil.copy2(str(src), str(www_dir / "my-panel.js"))
+
+await async_register_panel(
+    hass,
+    frontend_url_path="my-panel",
+    webcomponent_name="my-panel",
+    sidebar_title="My Panel",
+    sidebar_icon="mdi:view-dashboard",
+    js_url=f"/local/my-panel.js?v={VERSION}",
+    require_admin=False,
+    config={},
+)
+```
