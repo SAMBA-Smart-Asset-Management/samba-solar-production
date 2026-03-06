@@ -1,0 +1,17 @@
+name: Solar Production
+version: "0.1.2"
+slug: solar-production
+description: Solar production forecasting and control integration
+url: https://github.com/SAMBA-Smart-Asset-Management/samba-solar-production
+arch:
+  - amd64
+startup: application
+boot: auto
+init: false
+hassio_api: true
+
+options: {}
+schema: {}
+
+map:
+  - config:rw
