@@ -1,4 +1,5 @@
 """Inverter control logic for Solar Production."""
+
 from __future__ import annotations
 
 import logging
@@ -8,15 +9,15 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_INVERTER_ON_ENTITY,
+    CONF_GLOBAL_OFF_ENTITY,
+    CONF_GLOBAL_ON_ENTITY,
     CONF_INVERTER_OFF_ENTITY,
+    CONF_INVERTER_ON_ENTITY,
     CONF_INVERTER_POWER_ENTITY,
     CONF_INVERTER_RATED_POWER_W,
-    CONF_GLOBAL_ON_ENTITY,
-    CONF_GLOBAL_OFF_ENTITY,
     MODE_FULL_PRODUCTION,
-    MODE_SELF_CONSUMPTION,
     MODE_NO_NEGATIVE_PRICES,
+    MODE_SELF_CONSUMPTION,
     SLOT_MINUTES,
 )
 
@@ -52,16 +53,22 @@ def evaluate_inverter(
 
     if mode == MODE_SELF_CONSUMPTION:
         return _eval_self_consumption(
-            is_modulatable, rated_power,
-            production_w, net_power_w,
-            selling_price, purchase_price,
+            is_modulatable,
+            rated_power,
+            production_w,
+            net_power_w,
+            selling_price,
+            purchase_price,
         )
 
     if mode == MODE_NO_NEGATIVE_PRICES:
         return _eval_no_negative_prices(
-            is_modulatable, rated_power,
-            production_w, net_power_w,
-            selling_price, purchase_price,
+            is_modulatable,
+            rated_power,
+            production_w,
+            net_power_w,
+            selling_price,
+            purchase_price,
         )
 
     return None
@@ -131,9 +138,12 @@ def _eval_no_negative_prices(
 
     # Negative selling price → switch to self-consumption logic
     return _eval_self_consumption(
-        is_modulatable, rated_power,
-        production_w, net_power_w,
-        selling_price, purchase_price,
+        is_modulatable,
+        rated_power,
+        production_w,
+        net_power_w,
+        selling_price,
+        purchase_price,
     )
 
 
@@ -208,9 +218,8 @@ def recommend_slot_action(
         return MODE_FULL_PRODUCTION, target, "Full production"
 
     # For self_consumption and no_negative_prices with negative price
-    needs_self_consumption = (
-        mode == MODE_SELF_CONSUMPTION
-        or (mode == MODE_NO_NEGATIVE_PRICES and selling_price < 0)
+    needs_self_consumption = mode == MODE_SELF_CONSUMPTION or (
+        mode == MODE_NO_NEGATIVE_PRICES and selling_price < 0
     )
 
     if needs_self_consumption:
@@ -262,20 +271,28 @@ async def execute_action(
     global_config = global_config or {}
 
     if action.action == "turn_on":
-        entity_id = inv_config.get(CONF_INVERTER_ON_ENTITY) or global_config.get(CONF_GLOBAL_ON_ENTITY)
+        entity_id = inv_config.get(CONF_INVERTER_ON_ENTITY) or global_config.get(
+            CONF_GLOBAL_ON_ENTITY
+        )
         if entity_id:
             await _call_entity_action(hass, entity_id)
             _LOGGER.info("Inverter ON via %s: %s", entity_id, action.reason)
         else:
-            _LOGGER.warning("Inverter ON requested but no on entity configured (individual or global)")
+            _LOGGER.warning(
+                "Inverter ON requested but no on entity configured (individual or global)"
+            )
 
     elif action.action == "turn_off":
-        entity_id = inv_config.get(CONF_INVERTER_OFF_ENTITY) or global_config.get(CONF_GLOBAL_OFF_ENTITY)
+        entity_id = inv_config.get(CONF_INVERTER_OFF_ENTITY) or global_config.get(
+            CONF_GLOBAL_OFF_ENTITY
+        )
         if entity_id:
             await _call_entity_action(hass, entity_id)
             _LOGGER.info("Inverter OFF via %s: %s", entity_id, action.reason)
         else:
-            _LOGGER.warning("Inverter OFF requested but no off entity configured (individual or global)")
+            _LOGGER.warning(
+                "Inverter OFF requested but no off entity configured (individual or global)"
+            )
 
     elif action.action == "set_power":
         entity_id = inv_config.get(CONF_INVERTER_POWER_ENTITY)
@@ -288,19 +305,17 @@ async def execute_action(
             )
             _LOGGER.info(
                 "Inverter power set to %.0fW: %s",
-                action.target_power_w, action.reason,
+                action.target_power_w,
+                action.reason,
             )
         else:
-            _LOGGER.warning("Inverter set_power requested but no power control entity configured")
+            _LOGGER.warning(
+                "Inverter set_power requested but no power control entity configured"
+            )
 
 
 async def _call_entity_action(hass: HomeAssistant, entity_id: str) -> None:
     """Call turn_on for a switch/script/button entity."""
     domain = entity_id.split(".")[0]
-    if domain == "button":
-        service = "press"
-    else:
-        service = "turn_on"
-    await hass.services.async_call(
-        domain, service, {"entity_id": entity_id}
-    )
+    service = "press" if domain == "button" else "turn_on"
+    await hass.services.async_call(domain, service, {"entity_id": entity_id})

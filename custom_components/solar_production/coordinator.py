@@ -1,37 +1,38 @@
 """Coordinator for Solar Production integration."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
-    DOMAIN,
-    CONF_SOLAR_FORECAST_PREFIX,
-    CONF_INVERTERS,
+    BO_SCHEDULE_FULL,
+    CONF_GLOBAL_OFF_ENTITY,
+    CONF_GLOBAL_ON_ENTITY,
     CONF_INVERTER_NAME,
     CONF_INVERTER_POWER_SENSOR,
     CONF_INVERTER_RATED_POWER_W,
-    CONF_GLOBAL_ON_ENTITY,
-    CONF_GLOBAL_OFF_ENTITY,
-    FORECAST_DAY_SUFFIXES,
-    UPDATE_INTERVAL_SECONDS,
-    INVERTER_EVAL_SECONDS,
-    SLOT_MINUTES,
-    EC_PRODUCTION_POWER,
+    CONF_INVERTERS,
+    CONF_SOLAR_FORECAST_PREFIX,
+    DOMAIN,
     EC_NET_POWER,
-    SELLING_PRICE_ENTITY,
-    PURCHASE_PRICE_ENTITY,
+    EC_PRODUCTION_POWER,
     EF_FORECAST_PARAMS,
     EF_FORECAST_SIMPLE,
-    BO_SCHEDULE_FULL,
+    FORECAST_DAY_SUFFIXES,
+    INVERTER_EVAL_SECONDS,
     MODE_FULL_PRODUCTION,
+    PURCHASE_PRICE_ENTITY,
+    SELLING_PRICE_ENTITY,
+    SLOT_MINUTES,
+    UPDATE_INTERVAL_SECONDS,
 )
 from .inverter_control import evaluate_inverter, execute_action
 
@@ -153,7 +154,7 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
             return SolarForecastData()
 
         # Calculate statistics
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow_start = today_start + timedelta(days=1)
         tomorrow_end = tomorrow_start + timedelta(days=1)
@@ -170,7 +171,7 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
             try:
                 ts = datetime.fromisoformat(ts_str)
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
             except (ValueError, TypeError):
                 continue
 
@@ -220,12 +221,12 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
             if power_sensor:
                 state = self.hass.states.get(power_sensor)
                 if state and state.state not in ("unavailable", "unknown"):
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         data.inverters[inv_id].current_power_w = float(state.state)
-                    except (ValueError, TypeError):
-                        pass
 
-    def _build_schedule(self, forecast: SolarForecastData) -> list[InverterScheduleSlot]:
+    def _build_schedule(
+        self, forecast: SolarForecastData
+    ) -> list[InverterScheduleSlot]:
         """Build predicted inverter schedule based on forecasts and prices."""
         schedule: list[InverterScheduleSlot] = []
 
@@ -268,16 +269,18 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
                 rated_power=rated_power,
             )
 
-            schedule.append(InverterScheduleSlot(
-                timestamp=ts_str,
-                solar_forecast_w=round(solar_w, 1),
-                demand_forecast_w=round(demand_w, 1),
-                export_forecast_w=round(export_w, 1),
-                selling_price=round(selling_price, 5),
-                recommended_action=action,
-                target_power_w=round(target_w, 1),
-                reason=reason,
-            ))
+            schedule.append(
+                InverterScheduleSlot(
+                    timestamp=ts_str,
+                    solar_forecast_w=round(solar_w, 1),
+                    demand_forecast_w=round(demand_w, 1),
+                    export_forecast_w=round(export_w, 1),
+                    selling_price=round(selling_price, 5),
+                    recommended_action=action,
+                    target_power_w=round(target_w, 1),
+                    reason=reason,
+                )
+            )
 
         return schedule
 
@@ -300,6 +303,7 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
             mode = self.data.inverters[inv_id].mode
 
         from .inverter_control import recommend_slot_action
+
         return recommend_slot_action(
             mode=mode,
             solar_w=solar_w,
@@ -469,6 +473,4 @@ class SolarProductionCoordinator(DataUpdateCoordinator[SolarProductionData]):
         """Set the control mode for an inverter (called from select entity)."""
         if self.data and inverter_id in self.data.inverters:
             self.data.inverters[inverter_id].mode = mode
-            _LOGGER.info(
-                "Inverter %s mode set to %s", inverter_id, mode
-            )
+            _LOGGER.info("Inverter %s mode set to %s", inverter_id, mode)

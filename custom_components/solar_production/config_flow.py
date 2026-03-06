@@ -1,4 +1,5 @@
 """Config flow for Solar Production integration."""
+
 from __future__ import annotations
 
 import logging
@@ -6,25 +7,24 @@ import re
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    DOMAIN,
-    CONF_SOLAR_FORECAST_PREFIX,
-    CONF_INVERTERS,
+    CONF_ENERGY_CORE_ENTRY,
+    CONF_GLOBAL_OFF_ENTITY,
+    CONF_GLOBAL_ON_ENTITY,
     CONF_INVERTER_NAME,
-    CONF_INVERTER_ON_ENTITY,
     CONF_INVERTER_OFF_ENTITY,
+    CONF_INVERTER_ON_ENTITY,
     CONF_INVERTER_POWER_ENTITY,
     CONF_INVERTER_POWER_SENSOR,
     CONF_INVERTER_RATED_POWER_W,
-    CONF_ENERGY_CORE_ENTRY,
-    CONF_GLOBAL_ON_ENTITY,
-    CONF_GLOBAL_OFF_ENTITY,
+    CONF_INVERTERS,
+    CONF_SOLAR_FORECAST_PREFIX,
     DEFAULT_SOLAR_FORECAST_PREFIX,
+    DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,8 +157,12 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_INVERTER_ON_ENTITY: on_entity,
                     CONF_INVERTER_OFF_ENTITY: off_entity,
                     CONF_INVERTER_POWER_ENTITY: power_entity,
-                    CONF_INVERTER_POWER_SENSOR: user_input.get(CONF_INVERTER_POWER_SENSOR),
-                    CONF_INVERTER_RATED_POWER_W: user_input.get(CONF_INVERTER_RATED_POWER_W),
+                    CONF_INVERTER_POWER_SENSOR: user_input.get(
+                        CONF_INVERTER_POWER_SENSOR
+                    ),
+                    CONF_INVERTER_RATED_POWER_W: user_input.get(
+                        CONF_INVERTER_RATED_POWER_W
+                    ),
                 }
                 self._inverters.append(inverter_data)
                 return await self.async_step_add_another()
@@ -241,7 +245,7 @@ class SolarProductionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Auto-select if only one
         if len(ec_entries) == 1:
-            self._energy_core_entry = list(ec_entries.keys())[0]
+            self._energy_core_entry = next(iter(ec_entries.keys()))
             return self._create_entry()
 
         if user_input is not None:
@@ -288,7 +292,12 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
         """Manage the options."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["edit_prefix", "edit_global_switch", "add_inverter", "remove_inverter"],
+            menu_options=[
+                "edit_prefix",
+                "edit_global_switch",
+                "add_inverter",
+                "remove_inverter",
+            ],
         )
 
     async def async_step_edit_global_switch(
@@ -309,9 +318,11 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
 
         schema = {}
         if current_on:
-            schema[vol.Optional(CONF_GLOBAL_ON_ENTITY, default=current_on)] = selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain=["switch", "script", "button", "input_button"],
+            schema[vol.Optional(CONF_GLOBAL_ON_ENTITY, default=current_on)] = (
+                selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["switch", "script", "button", "input_button"],
+                    )
                 )
             )
         else:
@@ -321,9 +332,11 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
                 )
             )
         if current_off:
-            schema[vol.Optional(CONF_GLOBAL_OFF_ENTITY, default=current_off)] = selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain=["switch", "script", "button", "input_button"],
+            schema[vol.Optional(CONF_GLOBAL_OFF_ENTITY, default=current_off)] = (
+                selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["switch", "script", "button", "input_button"],
+                    )
                 )
             )
         else:
@@ -344,7 +357,9 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
         """Edit the solar forecast prefix."""
         if user_input is not None:
             new_data = dict(self.config_entry.data)
-            new_data[CONF_SOLAR_FORECAST_PREFIX] = user_input[CONF_SOLAR_FORECAST_PREFIX]
+            new_data[CONF_SOLAR_FORECAST_PREFIX] = user_input[
+                CONF_SOLAR_FORECAST_PREFIX
+            ]
             self.hass.config_entries.async_update_entry(
                 self.config_entry, data=new_data
             )
@@ -357,7 +372,9 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
             step_id="edit_prefix",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SOLAR_FORECAST_PREFIX, default=current): selector.TextSelector(),
+                    vol.Required(
+                        CONF_SOLAR_FORECAST_PREFIX, default=current
+                    ): selector.TextSelector(),
                 }
             ),
         )
@@ -375,10 +392,9 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
             power_entity = user_input.get(CONF_INVERTER_POWER_ENTITY)
 
             has_own_control = on_entity or off_entity or power_entity
-            has_global_fallback = (
-                self.config_entry.data.get(CONF_GLOBAL_ON_ENTITY)
-                or self.config_entry.data.get(CONF_GLOBAL_OFF_ENTITY)
-            )
+            has_global_fallback = self.config_entry.data.get(
+                CONF_GLOBAL_ON_ENTITY
+            ) or self.config_entry.data.get(CONF_GLOBAL_OFF_ENTITY)
 
             if not name:
                 errors[CONF_INVERTER_NAME] = "empty_inverter_name"
@@ -391,8 +407,12 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
                     CONF_INVERTER_ON_ENTITY: on_entity,
                     CONF_INVERTER_OFF_ENTITY: off_entity,
                     CONF_INVERTER_POWER_ENTITY: power_entity,
-                    CONF_INVERTER_POWER_SENSOR: user_input.get(CONF_INVERTER_POWER_SENSOR),
-                    CONF_INVERTER_RATED_POWER_W: user_input.get(CONF_INVERTER_RATED_POWER_W),
+                    CONF_INVERTER_POWER_SENSOR: user_input.get(
+                        CONF_INVERTER_POWER_SENSOR
+                    ),
+                    CONF_INVERTER_RATED_POWER_W: user_input.get(
+                        CONF_INVERTER_RATED_POWER_W
+                    ),
                 }
                 self._inverters.append(inverter_data)
                 new_data = dict(self.config_entry.data)
@@ -429,7 +449,9 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Optional(CONF_INVERTER_RATED_POWER_W): selector.NumberSelector(
                         selector.NumberSelectorConfig(
-                            min=0, max=100000, step=100,
+                            min=0,
+                            max=100000,
+                            step=100,
                             unit_of_measurement="W",
                             mode=selector.NumberSelectorMode.BOX,
                         )
@@ -449,8 +471,7 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             name = user_input.get("inverter_to_remove")
             self._inverters = [
-                inv for inv in self._inverters
-                if inv[CONF_INVERTER_NAME] != name
+                inv for inv in self._inverters if inv[CONF_INVERTER_NAME] != name
             ]
             new_data = dict(self.config_entry.data)
             new_data[CONF_INVERTERS] = self._inverters
@@ -460,8 +481,7 @@ class SolarProductionOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         options = {
-            inv[CONF_INVERTER_NAME]: inv[CONF_INVERTER_NAME]
-            for inv in self._inverters
+            inv[CONF_INVERTER_NAME]: inv[CONF_INVERTER_NAME] for inv in self._inverters
         }
         return self.async_show_form(
             step_id="remove_inverter",

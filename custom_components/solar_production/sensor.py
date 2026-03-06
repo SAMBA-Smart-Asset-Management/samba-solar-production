@@ -1,12 +1,13 @@
 """Sensor entities for Solar Production integration."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
-    SensorEntity,
     SensorDeviceClass,
+    SensorEntity,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -15,8 +16,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_INVERTERS, SENSOR_PREFIX
-from .coordinator import SolarProductionCoordinator, SolarProductionData
+from .const import CONF_INVERTERS, DOMAIN, SENSOR_PREFIX
+from .coordinator import SolarProductionCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Solar Production sensors."""
-    coordinator: SolarProductionCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: SolarProductionCoordinator = hass.data[DOMAIN][entry.entry_id][
+        "coordinator"
+    ]
 
     entities: list[SensorEntity] = [
         SPSolarForecastSensor(coordinator),
@@ -43,7 +46,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class SPSolarForecastSensor(CoordinatorEntity[SolarProductionCoordinator], SensorEntity):
+class SPSolarForecastSensor(
+    CoordinatorEntity[SolarProductionCoordinator], SensorEntity
+):
     """Main solar forecast sensor - aggregates all day forecasts into one."""
 
     _attr_has_entity_name = False
@@ -88,7 +93,9 @@ class SPSolarForecastSensor(CoordinatorEntity[SolarProductionCoordinator], Senso
         }
 
 
-class SPInverterStatusSensor(CoordinatorEntity[SolarProductionCoordinator], SensorEntity):
+class SPInverterStatusSensor(
+    CoordinatorEntity[SolarProductionCoordinator], SensorEntity
+):
     """Status sensor for a single inverter."""
 
     _attr_has_entity_name = False
@@ -143,7 +150,9 @@ class SPInverterStatusSensor(CoordinatorEntity[SolarProductionCoordinator], Sens
         }
 
 
-class SPInverterScheduleSensor(CoordinatorEntity[SolarProductionCoordinator], SensorEntity):
+class SPInverterScheduleSensor(
+    CoordinatorEntity[SolarProductionCoordinator], SensorEntity
+):
     """Schedule prediction sensor - when should inverter be on/off/limited."""
 
     _attr_has_entity_name = False

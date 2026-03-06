@@ -1,4 +1,5 @@
 """Constants for the Solar Production integration."""
+
 from __future__ import annotations
 
 DOMAIN = "solar_production"
@@ -9,7 +10,7 @@ ENERGY_CORE_DOMAIN = "energy_core"
 SENSOR_PREFIX = "sp"
 
 # ---------------------------------------------------------------------------
-# Config keys – Solar forecast
+# Config keys - Solar forecast
 # ---------------------------------------------------------------------------
 CONF_SOLAR_FORECAST_PREFIX = "solar_forecast_prefix"
 DEFAULT_SOLAR_FORECAST_PREFIX = "sensor.energy_production"
@@ -27,7 +28,7 @@ FORECAST_DAY_SUFFIXES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Config keys – Inverter
+# Config keys - Inverter
 # ---------------------------------------------------------------------------
 CONF_INVERTERS = "inverters"
 CONF_INVERTER_NAME = "inverter_name"
@@ -42,7 +43,7 @@ CONF_GLOBAL_ON_ENTITY = "global_on_entity"
 CONF_GLOBAL_OFF_ENTITY = "global_off_entity"
 
 # ---------------------------------------------------------------------------
-# Config keys – Energy Core
+# Config keys - Energy Core
 # ---------------------------------------------------------------------------
 CONF_ENERGY_CORE_ENTRY = "energy_core_entry"
 

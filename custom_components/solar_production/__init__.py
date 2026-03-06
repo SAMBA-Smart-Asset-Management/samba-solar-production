@@ -1,4 +1,5 @@
 """Solar Production - Solar forecast aggregation and inverter control."""
+
 from __future__ import annotations
 
 import logging

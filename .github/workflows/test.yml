@@ -1,0 +1,58 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+
+  validate-hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate HACS integration
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  version-check:
+    name: Version bumped
+    runs-on: ubuntu-latest
+    if: github.base_ref == 'main' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version is bumped vs main
+        run: |
+          CURRENT=$(jq -r '.version' custom_components/solar_production/manifest.json)
+          MAIN=$(git show origin/main:custom_components/solar_production/manifest.json | jq -r '.version')
+          echo "Version in this branch: ${CURRENT}"
+          echo "Version on main:        ${MAIN}"
+          if [ "$CURRENT" = "$MAIN" ]; then
+            echo "ERROR: manifest.json version has not been bumped from main."
+            echo "Please update the version field in manifest.json before merging to main."
+            exit 1
+          fi
+          echo "OK: ${CURRENT} != ${MAIN}"

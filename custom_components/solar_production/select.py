@@ -1,8 +1,8 @@
 """Select entity for inverter control mode."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -11,12 +11,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
-    DOMAIN,
-    SENSOR_PREFIX,
     CONF_INVERTERS,
+    DOMAIN,
     INVERTER_MODES,
     MODE_FULL_PRODUCTION,
     SELLING_PRICE_ENTITY,
+    SENSOR_PREFIX,
 )
 from .coordinator import SolarProductionCoordinator
 
@@ -29,15 +29,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Solar Production select entities."""
-    coordinator: SolarProductionCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: SolarProductionCoordinator = hass.data[DOMAIN][entry.entry_id][
+        "coordinator"
+    ]
 
     entities = []
     for inv in entry.data.get(CONF_INVERTERS, []):
         inv_id = inv.get("inverter_id", "")
         inv_name = inv.get("inverter_name", inv_id)
-        entities.append(
-            SPInverterModeSelect(coordinator, hass, inv_id, inv_name)
-        )
+        entities.append(SPInverterModeSelect(coordinator, hass, inv_id, inv_name))
 
     async_add_entities(entities)
 
@@ -85,12 +85,11 @@ class SPInverterModeSelect(RestoreEntity, SelectEntity):
         last_state = await self.async_get_last_state()
         if last_state and last_state.state in INVERTER_MODES:
             self._attr_current_option = last_state.state
-            self._coordinator.set_inverter_mode(
-                self._inverter_id, last_state.state
-            )
+            self._coordinator.set_inverter_mode(self._inverter_id, last_state.state)
             _LOGGER.info(
                 "Restored inverter %s mode: %s",
-                self._inverter_id, last_state.state,
+                self._inverter_id,
+                last_state.state,
             )
 
     async def async_select_option(self, option: str) -> None:
@@ -104,5 +103,6 @@ class SPInverterModeSelect(RestoreEntity, SelectEntity):
         self.async_write_ha_state()
         _LOGGER.info(
             "Inverter %s mode changed to %s",
-            self._inverter_id, option,
+            self._inverter_id,
+            option,
         )
