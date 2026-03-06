@@ -1,5 +1,7 @@
 {
   "name": "Solar Production",
-  "domain": "solar_production",
+  "domains": ["select", "sensor"],
+  "documentation": "https://github.com/SAMBA-Smart-Asset-Management/samba-solar-production",
+  "iot_class": "local_polling",
   "render_readme": true
 }
