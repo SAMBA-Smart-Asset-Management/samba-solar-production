@@ -41,6 +41,14 @@ Minimize token usage at all times:
 5. New sites: HA backup restore on mini-PC + `setup-ha-machine.sh` for GHCR credentials
    (see samba-dev-ops issue #1 for full distribution architecture)
 
+## Version & Release (BELANGRIJK)
+HA detecteert updates alleen via **git tags**. Na elke wijziging die naar productie moet:
+1. Bump `version` in `manifest.json` (en `const.py` VERSION als het project een dashboard heeft)
+2. Commit de version bump
+3. `git tag v{versie} && git push origin main --tags`
+Zonder tag ziet HA geen update, ook al staat de code op main.
+
+
 ## GitHub
 - Org: SAMBA-Smart-Asset-Management
 - Auth: `gh auth login` as Leonsturkenboom
