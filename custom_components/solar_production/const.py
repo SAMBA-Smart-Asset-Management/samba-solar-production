@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "solar_production"
-VERSION = "0.1.0"
+VERSION = "0.1.2"
 ENERGY_CORE_DOMAIN = "energy_core"
 
 # Sensor prefix
