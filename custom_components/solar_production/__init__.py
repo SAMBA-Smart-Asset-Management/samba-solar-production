@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = ["sensor", "select"]
 
-PANEL_URL = "/solar_production/solar-production-panel.js"
+PANEL_FILENAME = "solar-production-panel.js"
 PANEL_NAME = "solar-production-panel"
 PANEL_TITLE = "Solar Production"
 PANEL_ICON = "mdi:solar-power"
@@ -23,13 +24,15 @@ PANEL_ICON = "mdi:solar-power"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Solar Production component."""
-    # Register the panel JS file as a static path
-    panel_path = Path(__file__).parent / "solar-production-panel.js"
-    if panel_path.is_file():
-        hass.http.register_static_path(PANEL_URL, str(panel_path), cache_headers=False)
-        _LOGGER.debug("Registered static path for solar production panel")
+    src = Path(__file__).parent / PANEL_FILENAME
+    if src.is_file():
+        # Copy JS to /config/www/ so it's served at /local/
+        www_dir = Path(hass.config.path("www"))
+        www_dir.mkdir(exist_ok=True)
+        shutil.copy2(str(src), str(www_dir / PANEL_FILENAME))
+        _LOGGER.debug("Copied solar production panel to %s", www_dir)
 
-        # Register the sidebar panel (lazy import to avoid load-time errors)
+        # Register the sidebar panel with cache-busting version
         try:
             from homeassistant.components.panel_custom import async_register_panel
 
@@ -39,11 +42,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 webcomponent_name=PANEL_NAME,
                 sidebar_title=PANEL_TITLE,
                 sidebar_icon=PANEL_ICON,
-                module_url=PANEL_URL,
+                js_url=f"/local/{PANEL_FILENAME}?v={VERSION}",
                 require_admin=False,
                 config={},
             )
-            _LOGGER.info("Solar Production sidebar panel registered")
+            _LOGGER.info(
+                "Solar Production sidebar panel registered (v%s)", VERSION
+            )
         except Exception:
             _LOGGER.warning(
                 "Could not register sidebar panel — "
@@ -53,7 +58,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         _LOGGER.warning(
             "solar-production-panel.js not found at %s — "
             "sidebar panel will not be available",
-            panel_path,
+            src,
         )
 
     return True
