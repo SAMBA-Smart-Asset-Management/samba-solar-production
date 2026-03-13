@@ -1,6 +1,6 @@
 // SAMBA ECharts Theme - based on samba.energy design system
 export const sambaTheme = {
-  color: ['#085E34', '#FFA726', '#2563EB', '#EEFF41', '#EF5350', '#6b7280'],
+  color: ['#085E34', '#FFA726', '#00BCD4', '#EEFF41', '#EF5350', '#6b7280'],
   backgroundColor: 'transparent',
   textStyle: {
     fontFamily: "'IBM Plex Sans', sans-serif",

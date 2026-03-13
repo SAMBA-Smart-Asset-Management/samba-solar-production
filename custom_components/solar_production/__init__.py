@@ -18,7 +18,7 @@ PLATFORMS: list[str] = ["sensor", "select"]
 
 PANEL_FILENAME = "solar-production-panel.js"
 PANEL_NAME = "solar-production-panel"
-PANEL_TITLE = "Solar Production"
+PANEL_TITLE = "Zon / Solar"
 PANEL_ICON = "mdi:solar-power"
 
 
