@@ -1,69 +1,66 @@
-import { useState, useEffect, useMemo } from 'react';
-import {
-  ComposedChart, Area, Bar, XAxis, YAxis, PieChart, Pie, Cell,
-  CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
-} from 'recharts';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import ReactECharts from 'echarts-for-react';
+import { GRID_DUAL, formatTime } from '../chartHelpers';
 
-const SLOT_MS = 15 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const Q_MS = 15 * 60 * 1000;
 
-function toSlotKey(date) {
-  const d = new Date(date);
-  d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
-  return d.getTime();
+function tsToMs(raw) {
+  if (typeof raw === 'string') return new Date(raw).getTime();
+  if (typeof raw === 'number') return raw < 1e12 ? raw * 1000 : raw;
+  return 0;
 }
 
 function toHourKey(date) {
-  const d = new Date(date);
+  const ms = typeof date === 'number' ? (date < 1e12 ? date * 1000 : date) : new Date(date).getTime();
+  const d = new Date(ms);
   d.setMinutes(0, 0, 0);
   return d.getTime();
 }
 
-function formatTime(ms) {
-  return new Date(ms).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+function toQuarterKey(date) {
+  const ms = typeof date === 'number' ? (date < 1e12 ? date * 1000 : date) : new Date(date).getTime();
+  const d = new Date(ms);
+  d.setMinutes(Math.floor(d.getMinutes() / 15) * 15, 0, 0);
+  return d.getTime();
 }
 
-// Build price lookup map from price array [{from, till, price}]
+function lastPerSlot(points, keyFn) {
+  const bySlot = {};
+  for (const point of points) {
+    const raw = point.lu ?? point.last_updated;
+    if (raw == null) continue;
+    const key = keyFn(tsToMs(raw));
+    const val = parseFloat(point.s ?? point.state);
+    if (!isNaN(val) && val >= 0) bySlot[key] = val;
+  }
+  return bySlot;
+}
+
 function buildPriceLookup(priceArray) {
   const map = {};
   if (!priceArray || !Array.isArray(priceArray)) return map;
   for (const slot of priceArray) {
-    try {
-      const from = new Date(slot.from).getTime();
-      map[from] = slot.price;
-    } catch {}
+    try { map[new Date(slot.from).getTime()] = slot.price; } catch {}
   }
   return map;
 }
 
-// Find the price for a given timestamp from a price lookup map
-function findPrice(priceLookup, timestampMs, slotDurationMs) {
-  // Direct match
-  if (priceLookup[timestampMs] != null) return priceLookup[timestampMs];
-  // Find the hourly slot that contains this timestamp
+function findPrice(lookup, timestampMs) {
+  if (lookup[timestampMs] != null) return lookup[timestampMs];
   const hourKey = toHourKey(timestampMs);
-  if (priceLookup[hourKey] != null) return priceLookup[hourKey];
-  // Search for the slot that this timestamp falls within
-  for (const [fromMs, price] of Object.entries(priceLookup)) {
-    const from = Number(fromMs);
-    if (timestampMs >= from && timestampMs < from + slotDurationMs) return price;
-  }
+  if (lookup[hourKey] != null) return lookup[hourKey];
   return 0;
 }
 
-// Detect price granularity from price array (15 min or 1 hour)
 function detectPriceGranularity(priceArray) {
-  if (!priceArray || !Array.isArray(priceArray) || priceArray.length < 2) return 'hour';
+  if (!priceArray || priceArray.length < 2) return 'hour';
   try {
-    const from0 = new Date(priceArray[0].from).getTime();
-    const till0 = new Date(priceArray[0].till).getTime();
-    const diffMin = (till0 - from0) / (60 * 1000);
-    return diffMin <= 15 ? 'kwartier' : 'hour';
-  } catch {
-    return 'hour';
-  }
+    const diff = new Date(priceArray[1].from).getTime() - new Date(priceArray[0].from).getTime();
+    return diff <= Q_MS ? 'kwartier' : 'hour';
+  } catch { return 'hour'; }
 }
 
-// Read a numeric entity state
 function readEntityFloat(hass, entityId) {
   const state = hass?.states?.[entityId];
   if (!state || state.state === 'unavailable' || state.state === 'unknown') return null;
@@ -71,44 +68,64 @@ function readEntityFloat(hass, entityId) {
   return isNaN(val) ? null : val;
 }
 
-const toggleGroupStyle = {
-  display: 'inline-flex', borderRadius: '6px', overflow: 'hidden',
-  border: '1px solid #e5e7eb',
+const matIcon = {
+  fontFamily: 'Material Symbols Outlined',
+  fontWeight: 'normal',
+  fontStyle: 'normal',
+  fontSize: '18px',
+  lineHeight: 1,
+  WebkitFontSmoothing: 'antialiased',
 };
 
-const toggleBtnStyle = (active, disabled) => ({
-  padding: '5px 14px', border: 'none',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  fontSize: '12px', fontWeight: active ? 600 : 400,
-  background: disabled ? '#fecaca' : active ? '#FDD835' : '#fff',
-  color: disabled ? '#991b1b' : active ? '#1a1a1a' : '#6b7280',
-  opacity: disabled ? 0.7 : 1,
-  transition: 'all 0.15s',
-  position: 'relative',
-});
+const KPI_ENTITIES = {
+  producedDay: 'sensor.ec_produced_energy_day',
+  selfConsumedDay: 'sensor.ec_self_consumed_energy_day',
+  sellRevenueDay: 'sensor.ep_sell_revenue_day',
+  emissionsAvoidedDay: 'sensor.ec_emissions_avoided_day',
+};
 
-const STATUS_DOT = { ok: '#22c55e', warning: '#f59e0b', error: '#ef4444' };
-
-export default function ProductionTodayChart({ hass, entities, colors, solarEntity }) {
+export default function ProductionTodayChart({ hass, entities, colors, fonts, solarEntity }) {
   const [historyData, setHistoryData] = useState(null);
-  const [resolution, setResolution] = useState('kwartier');
-  const [unit, setUnit] = useState('wh');
+  const [viewMode, setViewMode] = useState('kWh');
+  const [resolution, setResolution] = useState('uur');
+  const [showConfig, setShowConfig] = useState(false);
+  const configRef = useRef(null);
 
-  // Fetch history for today (all relevant entities)
+  useEffect(() => {
+    if (!showConfig) return;
+    const handler = (e) => {
+      if (configRef.current && !configRef.current.contains(e.target)) setShowConfig(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showConfig]);
+
+  // Price arrays and granularity
+  const purchasePricesArr = hass?.states?.[entities.purchasePrice]?.attributes?.purchase_prices_today;
+  const sellingPricesArr = hass?.states?.[entities.sellingPrice]?.attributes?.selling_prices_today;
+  const priceGranularity = useMemo(() => detectPriceGranularity(purchasePricesArr), [purchasePricesArr]);
+  const purchaseLookup = useMemo(() => buildPriceLookup(purchasePricesArr), [purchasePricesArr]);
+  const sellingLookup = useMemo(() => buildPriceLookup(sellingPricesArr), [sellingPricesArr]);
+
+  const hasQuarterPrices = priceGranularity === 'kwartier';
+
+  // Auto-switch to uur when € mode and no quarter prices
+  useEffect(() => {
+    if (viewMode === '€' && !hasQuarterPrices && resolution === 'kwartier') {
+      setResolution('uur');
+    }
+  }, [viewMode, hasQuarterPrices, resolution]);
+
+  // Fetch history
   useEffect(() => {
     if (!hass?.callWS) return;
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
 
-    const entityIds = [
-      entities.producedEnergy15m,
-      entities.exportedEnergy15m,
-    ];
-    if (entities.selfConsumedEnergy15m) entityIds.push(entities.selfConsumedEnergy15m);
-    if (entities.selfStoredEnergy15m) entityIds.push(entities.selfStoredEnergy15m);
-    if (entities.selfConsumedBatteryEnergy15m) entityIds.push(entities.selfConsumedBatteryEnergy15m);
-    if (entities.exportedBatteryEnergy15m) entityIds.push(entities.exportedBatteryEnergy15m);
+    const entityIds = resolution === 'kwartier'
+      ? [entities.producedEnergy15m, entities.exportedEnergy15m, entities.selfConsumedEnergy15m, entities.selfStoredEnergy15m, entities.selfConsumedBatteryEnergy15m, entities.exportedBatteryEnergy15m].filter(Boolean)
+      : [entities.selfConsumedHour, entities.exportedResidualHour, entities.selfStoredHour, entities.producedEnergyHour].filter(Boolean);
 
     hass.callWS({
       type: 'history/history_during_period',
@@ -118,455 +135,475 @@ export default function ProductionTodayChart({ hass, entities, colors, solarEnti
       minimal_response: true,
       significant_changes_only: false,
     }).then(setHistoryData).catch(() => {});
-  }, [hass, entities.producedEnergy15m, entities.exportedEnergy15m,
-      entities.selfConsumedEnergy15m, entities.selfStoredEnergy15m,
-      entities.selfConsumedBatteryEnergy15m, entities.exportedBatteryEnergy15m]);
+  }, [hass, entities, resolution]);
 
-  // Price arrays and granularity detection
-  const purchasePrices = hass?.states?.[entities.purchasePrice]?.attributes?.purchase_prices_today;
-  const sellingPrices = hass?.states?.[entities.sellingPrice]?.attributes?.selling_prices_today;
-  const priceGranularity = useMemo(() => detectPriceGranularity(purchasePrices), [purchasePrices]);
-  const purchaseLookup = useMemo(() => buildPriceLookup(purchasePrices), [purchasePrices]);
-  const sellingLookup = useMemo(() => buildPriceLookup(sellingPrices), [sellingPrices]);
-
-  // Kwartier disabled when: euro mode AND price granularity is hourly
-  const kwartierDisabled = unit === 'euro' && priceGranularity === 'hour';
-
-  // Auto-switch to uur when switching to euro with hourly prices
-  useEffect(() => {
-    if (unit === 'euro' && priceGranularity === 'hour' && resolution === 'kwartier') {
-      setResolution('uur');
+  const sellingPrices = useMemo(() => {
+    const prices = {};
+    if (sellingPricesArr) {
+      for (const p of sellingPricesArr) {
+        if (p?.from && p?.price != null) prices[new Date(p.from).getTime()] = p.price * 100;
+      }
     }
-  }, [unit, priceGranularity, resolution]);
+    return prices;
+  }, [sellingPricesArr]);
 
-  // Base 15-min chart data
-  const rawChartData = useMemo(() => {
+  const chartData = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
 
-    const slots = {};
-    for (let t = todayStart.getTime(); t < todayEnd.getTime(); t += SLOT_MS) {
-      slots[t] = { timestamp: t, produced: null, exported: null, selfConsumed: null,
-                    selfStored: null, battSelfConsumed: null, battExported: null, forecast: null };
-    }
+    const interval = resolution === 'kwartier' ? Q_MS : HOUR_MS;
+    const keyFn = resolution === 'kwartier' ? toQuarterKey : toHourKey;
 
-    if (historyData) {
-      const processEntity = (entityId, field) => {
+    const slots = [];
+    for (let t = todayStart.getTime(); t < todayEnd.getTime(); t += interval) {
+      slots.push({ timestamp: t, directUse: 0, returned: 0, battery: 0, battHome: 0, battGrid: 0, forecast: null, sellingPrice: null });
+    }
+    const slotIndex = {};
+    slots.forEach((s, i) => { slotIndex[s.timestamp] = i; });
+
+    if (historyData && resolution === 'uur') {
+      const fill = (entityId, field) => {
         if (!entityId) return;
-        const points = historyData[entityId] || [];
-        for (const point of points) {
-          const key = toSlotKey(point.lu || point.last_updated);
-          if (slots[key] != null) {
-            const val = parseFloat(point.s || point.state);
-            if (!isNaN(val)) slots[key][field] = val * 4 * 1000; // kWh/15min → W
-          }
+        const bySlot = lastPerSlot(historyData[entityId] || [], keyFn);
+        for (const [key, val] of Object.entries(bySlot)) {
+          const idx = slotIndex[parseInt(key)];
+          if (idx != null) slots[idx][field] = val;
         }
       };
+      fill(entities.selfConsumedHour, 'directUse');
+      fill(entities.exportedResidualHour, 'returned');
+      fill(entities.selfStoredHour, 'battery');
+    } else if (historyData && resolution === 'kwartier') {
+      const produced = lastPerSlot(historyData[entities.producedEnergy15m] || [], keyFn);
+      const exported = lastPerSlot(historyData[entities.exportedEnergy15m] || [], keyFn);
+      const selfConsumed = entities.selfConsumedEnergy15m ? lastPerSlot(historyData[entities.selfConsumedEnergy15m] || [], keyFn) : {};
+      const selfStored = entities.selfStoredEnergy15m ? lastPerSlot(historyData[entities.selfStoredEnergy15m] || [], keyFn) : {};
+      const battHome = entities.selfConsumedBatteryEnergy15m ? lastPerSlot(historyData[entities.selfConsumedBatteryEnergy15m] || [], keyFn) : {};
+      const battGrid = entities.exportedBatteryEnergy15m ? lastPerSlot(historyData[entities.exportedBatteryEnergy15m] || [], keyFn) : {};
 
-      processEntity(entities.producedEnergy15m, 'produced');
-      processEntity(entities.exportedEnergy15m, 'exported');
-      processEntity(entities.selfConsumedEnergy15m, 'selfConsumed');
-      processEntity(entities.selfStoredEnergy15m, 'selfStored');
-      processEntity(entities.selfConsumedBatteryEnergy15m, 'battSelfConsumed');
-      processEntity(entities.exportedBatteryEnergy15m, 'battExported');
+      for (const [key, val] of Object.entries(produced)) {
+        const idx = slotIndex[parseInt(key)];
+        if (idx == null) continue;
+        const exp = exported[parseInt(key)] || 0;
+        const sc = selfConsumed[parseInt(key)];
+        const ss = selfStored[parseInt(key)] || 0;
+
+        slots[idx].directUse = sc != null ? sc : Math.max(0, val - exp - ss);
+        slots[idx].returned = exp;
+        slots[idx].battery = ss;
+        slots[idx].battHome = battHome[parseInt(key)] || 0;
+        slots[idx].battGrid = battGrid[parseInt(key)] || 0;
+      }
     }
 
-    // Forecast from solar entity watts attribute
+    // Forecast
     const watts = solarEntity?.attributes?.watts;
     if (watts && typeof watts === 'object') {
+      const forecastSlots = {};
       for (const [ts, w] of Object.entries(watts)) {
         try {
-          const key = toSlotKey(ts);
-          if (slots[key] != null) slots[key].forecast = parseFloat(w);
+          const key = keyFn(ts);
+          if (!forecastSlots[key]) forecastSlots[key] = { sum: 0, count: 0 };
+          forecastSlots[key].sum += parseFloat(w);
+          forecastSlots[key].count++;
         } catch {}
       }
-    }
-
-    // Fallback: calculate selfConsumed if entity not available
-    for (const slot of Object.values(slots)) {
-      if (slot.selfConsumed == null && slot.produced != null && slot.exported != null) {
-        slot.selfConsumed = Math.max(0, slot.produced - slot.exported - (slot.selfStored || 0));
-      }
-    }
-
-    return Object.values(slots).sort((a, b) => a.timestamp - b.timestamp);
-  }, [historyData, solarEntity, entities]);
-
-  // Aggregated chart data based on resolution
-  const chartData = useMemo(() => {
-    if (resolution === 'kwartier') return rawChartData;
-
-    const hourly = {};
-    for (const slot of rawChartData) {
-      const key = toHourKey(slot.timestamp);
-      if (!hourly[key]) {
-        hourly[key] = { timestamp: key, fields: {} };
-        for (const f of ['produced', 'exported', 'selfConsumed', 'selfStored', 'battSelfConsumed', 'battExported', 'forecast']) {
-          hourly[key].fields[f] = { sum: 0, n: 0 };
-        }
-      }
-      for (const f of ['produced', 'exported', 'selfConsumed', 'selfStored', 'battSelfConsumed', 'battExported', 'forecast']) {
-        if (slot[f] != null) {
-          hourly[key].fields[f].sum += slot[f];
-          hourly[key].fields[f].n++;
+      for (const [key, { sum, count }] of Object.entries(forecastSlots)) {
+        const idx = slotIndex[parseInt(key)];
+        if (idx != null) {
+          const avgW = sum / count;
+          const hoursPerSlot = interval / HOUR_MS;
+          slots[idx].forecast = (avgW * hoursPerSlot) / 1000;
         }
       }
     }
 
-    return Object.values(hourly).map((h) => {
-      const result = { timestamp: h.timestamp };
-      for (const f of ['produced', 'exported', 'selfConsumed', 'selfStored', 'battSelfConsumed', 'battExported', 'forecast']) {
-        result[f] = h.fields[f].n > 0 ? h.fields[f].sum / h.fields[f].n : null;
+    // Selling prices
+    for (const [ms, price] of Object.entries(sellingPrices)) {
+      const idx = slotIndex[parseInt(ms)];
+      if (idx != null) slots[idx].sellingPrice = price;
+    }
+    if (resolution === 'kwartier') {
+      for (const slot of slots) {
+        if (slot.sellingPrice == null) {
+          const hourKey = toHourKey(slot.timestamp);
+          if (sellingPrices[hourKey] != null) slot.sellingPrice = sellingPrices[hourKey];
+        }
       }
-      return result;
-    }).sort((a, b) => a.timestamp - b.timestamp);
-  }, [rawChartData, resolution]);
+    }
 
-  // Convert to display unit (Wh or €)
+    return slots;
+  }, [historyData, solarEntity, entities, sellingPrices, resolution]);
+
+  // Apply view mode: multiply energy by price
   const displayData = useMemo(() => {
-    if (unit === 'wh') return chartData;
-
-    const hoursPerSlot = resolution === 'kwartier' ? 0.25 : 1;
-    const priceDurationMs = priceGranularity === 'kwartier' ? SLOT_MS : 60 * 60 * 1000;
-
-    return chartData.map((slot) => {
-      const purchasePrice = findPrice(purchaseLookup, slot.timestamp, priceDurationMs);
-      const sellingPrice = findPrice(sellingLookup, slot.timestamp, priceDurationMs);
-
-      const toEuro = (watts, price) => {
-        if (watts == null) return null;
-        // W → kWh for this slot, then × price
-        return (watts * hoursPerSlot / 1000) * price;
-      };
-
+    if (viewMode === 'kWh') return chartData;
+    return chartData.map((d) => {
+      const buyPrice = findPrice(purchaseLookup, d.timestamp);
+      const sellPrice = findPrice(sellingLookup, d.timestamp);
       return {
-        ...slot,
-        // Self-consumed solar saves purchase price (didn't buy from grid)
-        selfConsumed: toEuro(slot.selfConsumed, purchasePrice),
-        // Exported earns selling price
-        exported: toEuro(slot.exported, sellingPrice),
-        // Self-stored: energy going into battery (valued at purchase price as potential savings)
-        selfStored: toEuro(slot.selfStored, purchasePrice),
-        // Battery self-consumed saves purchase price
-        battSelfConsumed: toEuro(slot.battSelfConsumed, purchasePrice),
-        // Battery exported earns selling price
-        battExported: toEuro(slot.battExported, sellingPrice),
-        // Forecast in selling price (potential revenue)
-        forecast: toEuro(slot.forecast, sellingPrice),
+        ...d,
+        directUse: d.directUse * buyPrice,
+        returned: d.returned * sellPrice,
+        battery: d.battery * buyPrice,
+        battHome: d.battHome * buyPrice,
+        battGrid: d.battGrid * sellPrice,
+        forecast: d.forecast != null ? d.forecast * buyPrice : null,
       };
     });
-  }, [chartData, unit, resolution, purchaseLookup, sellingLookup, priceGranularity]);
+  }, [chartData, viewMode, purchaseLookup, sellingLookup]);
 
-  // KPI calculations (always in kWh from raw data)
+  // KPIs from day sensors
   const kpis = useMemo(() => {
-    let totalProduced = 0, totalExported = 0, totalSelfConsumed = 0, peakW = 0;
-    let totalSelfStored = 0, totalBattSelf = 0, totalBattExported = 0;
-
-    for (const slot of rawChartData) {
-      if (slot.produced != null) {
-        totalProduced += slot.produced / 4000;
-        peakW = Math.max(peakW, slot.produced);
-      }
-      if (slot.exported != null) totalExported += slot.exported / 4000;
-      if (slot.selfConsumed != null) totalSelfConsumed += slot.selfConsumed / 4000;
-      if (slot.selfStored != null) totalSelfStored += slot.selfStored / 4000;
-      if (slot.battSelfConsumed != null) totalBattSelf += slot.battSelfConsumed / 4000;
-      if (slot.battExported != null) totalBattExported += slot.battExported / 4000;
-    }
-
-    const selfSuffPct = totalProduced > 0 ? (totalSelfConsumed / totalProduced) * 100 : 0;
+    const getState = (entityId) => readEntityFloat(hass, entityId);
+    const totalProduced = getState(KPI_ENTITIES.producedDay);
+    const totalDirectUse = getState(KPI_ENTITIES.selfConsumedDay);
+    const sellRevenue = getState(KPI_ENTITIES.sellRevenueDay);
+    const emissionsAvoided = getState(KPI_ENTITIES.emissionsAvoidedDay);
+    const forecastTotal = solarEntity?.attributes?.total_today_kwh;
 
     return {
-      totalProduced: totalProduced.toFixed(2),
-      totalExported: totalExported.toFixed(2),
-      totalSelfConsumed: totalSelfConsumed.toFixed(2),
-      totalSelfStored: totalSelfStored.toFixed(2),
-      totalBattSelf: totalBattSelf.toFixed(2),
-      totalBattExported: totalBattExported.toFixed(2),
-      peakW: Math.round(peakW),
-      selfSuffPct: selfSuffPct.toFixed(0),
+      totalProduced: totalProduced != null ? totalProduced.toFixed(1) : '—',
+      forecastTotal: forecastTotal != null ? parseFloat(forecastTotal).toFixed(1) : '—',
+      totalDirectUse: totalDirectUse != null ? totalDirectUse.toFixed(1) : '—',
+      sellRevenue: sellRevenue != null ? sellRevenue.toFixed(2) : '—',
+      emissionsAvoided: emissionsAvoided != null ? emissionsAvoided.toFixed(1) : '—',
     };
-  }, [rawChartData]);
+  }, [hass, solarEntity]);
 
-  // System status items for status report
-  const systemStatus = useMemo(() => {
+  // Status items: only last update + working status
+  const statusItems = useMemo(() => {
     const items = [];
+    const now = Date.now();
+    const fmtTime = (d) => d ? d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : null;
 
+    const prodEntity = hass?.states?.[entities.producedEnergyHour] || hass?.states?.[entities.producedEnergy15m];
+    const prodUpdated = prodEntity?.last_updated ? new Date(prodEntity.last_updated) : null;
+    const prodRecent = prodUpdated && (now - prodUpdated.getTime()) < 30 * 60 * 1000;
     items.push({
-      status: solarEntity && solarEntity.state !== 'unavailable' ? 'ok' : 'error',
-      onderdeel: 'Zonne-energie forecast',
-      bijzonderheden: solarEntity
-        ? `${solarEntity.attributes?.total_today_kwh ?? '—'} kWh verwacht vandaag`
-        : 'Forecast niet beschikbaar',
+      label: 'Communicatie',
+      status: prodRecent ? 'green' : 'red',
+      detail: prodRecent
+        ? `Functioneert. Laatste update ${fmtTime(prodUpdated)}`
+        : `Geen communicatie${prodUpdated ? `. Laatste update ${fmtTime(prodUpdated)}` : ''}`,
     });
 
-    const priceState = hass?.states?.[entities.sellingPrice];
-    const price = priceState ? parseFloat(priceState.state) : NaN;
+    const scheduleEntity = hass?.states?.[entities.inverterSchedule];
+    const scheduleUpdated = scheduleEntity?.last_updated ? new Date(scheduleEntity.last_updated) : null;
+    const scheduleOk = scheduleEntity && scheduleEntity.state !== 'unavailable';
     items.push({
-      status: !isNaN(price) ? (price >= 0 ? 'ok' : 'warning') : 'error',
-      onderdeel: 'Verkoopprijs',
-      bijzonderheden: !isNaN(price) ? `€${(price * 100).toFixed(1)} c/kWh` : 'Niet beschikbaar',
+      label: 'Controlfuncties',
+      status: scheduleOk ? 'green' : 'red',
+      detail: scheduleOk
+        ? `Functioneert. Laatste update ${fmtTime(scheduleUpdated) || '—'}`
+        : `Niet beschikbaar${scheduleUpdated ? `. Laatste update ${fmtTime(scheduleUpdated)}` : ''}`,
     });
 
-    const prodState = hass?.states?.[entities.productionPower];
+    const forecastOk = solarEntity && solarEntity.state !== 'unavailable';
+    const forecastUpdated = solarEntity?.last_updated ? new Date(solarEntity.last_updated) : null;
     items.push({
-      status: prodState && prodState.state !== 'unavailable' && prodState.state !== 'unknown' ? 'ok' : 'error',
-      onderdeel: 'Productie sensor',
-      bijzonderheden: prodState && prodState.state !== 'unavailable' ? `${prodState.state} W actueel` : 'Niet beschikbaar',
+      label: 'Forecast',
+      status: forecastOk ? 'green' : 'red',
+      detail: forecastOk
+        ? `Functioneert. Laatste update ${fmtTime(forecastUpdated) || '—'}`
+        : `Niet beschikbaar${forecastUpdated ? `. Laatste update ${fmtTime(forecastUpdated)}` : ''}`,
     });
 
-    if (hass?.states) {
-      Object.keys(hass.states)
-        .filter((id) => id.startsWith('sensor.sp_inverter_') && id.endsWith('_status'))
-        .forEach((id) => {
-          const state = hass.states[id];
-          const name = state?.attributes?.friendly_name || id.replace('sensor.sp_inverter_', '').replace('_status', '');
-          const statusText = state?.state === 'on' ? 'Actief' : state?.state === 'limited' ? 'Beperkt' : 'Uit';
-          const powerText = state?.attributes?.power_w != null ? `${Math.round(state.attributes.power_w)} W` : '';
-          items.push({
-            status: state?.state === 'on' ? 'ok' : state?.state === 'limited' ? 'warning' : 'error',
-            onderdeel: name,
-            bijzonderheden: [statusText, powerText].filter(Boolean).join(' — '),
-          });
-        });
+    const forecastKwh = solarEntity?.attributes?.total_today_kwh;
+    const producedKwh = parseFloat(kpis.totalProduced);
+    const currentHour = new Date().getHours();
+    let healthStatus, healthDetail;
+    if (!forecastKwh || isNaN(producedKwh) || producedKwh <= 0 || currentHour < 8) {
+      healthStatus = 'yellow';
+      healthDetail = currentHour < 8
+        ? 'Te vroeg voor beoordeling'
+        : 'Onvoldoende data voor beoordeling';
+    } else {
+      const ratio = (producedKwh / forecastKwh) * 100;
+      if (ratio >= 85 && ratio <= 115) {
+        healthStatus = 'green';
+        healthDetail = `Functioneert. ${ratio.toFixed(0)}% van forecast`;
+      } else if (ratio >= 70 && ratio <= 130) {
+        healthStatus = 'yellow';
+        healthDetail = `Afwijking gedetecteerd. ${ratio.toFixed(0)}% van forecast`;
+      } else {
+        healthStatus = 'red';
+        healthDetail = `Sterke afwijking. ${ratio.toFixed(0)}% van forecast`;
+      }
     }
-
-    const scheduleEntity = hass?.states?.['sensor.sp_inverter_schedule'];
-    const scheduleSlots = scheduleEntity?.attributes?.schedule;
-    items.push({
-      status: scheduleSlots && scheduleSlots.length > 0 ? 'ok' : 'warning',
-      onderdeel: 'Inverter schema',
-      bijzonderheden: scheduleSlots?.length > 0
-        ? `${scheduleSlots.length} slots gepland`
-        : 'Geen schema beschikbaar',
-    });
-
+    items.push({ label: 'Health', status: healthStatus, detail: healthDetail });
     return items;
-  }, [hass, entities, solarEntity]);
+  }, [hass, entities, solarEntity, kpis.totalProduced]);
 
-  // Pie chart data: energy distribution for this year
+  const unitLabel = viewMode === '€' ? '€' : 'kWh';
+  const hasBattery = chartData.some((d) => d.battery > 0 || d.battHome > 0 || d.battGrid > 0);
+
+  const chartOption = useMemo(() => {
+    const labels = displayData.map((d) => formatTime(d.timestamp));
+    const barWidth = resolution === 'kwartier' ? 8 : 20;
+
+    return {
+      grid: GRID_DUAL,
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          if (!params?.length) return '';
+          const idx = params[0].dataIndex;
+          const slot = displayData[idx];
+          const time = formatTime(slot?.timestamp || 0);
+          let html = `<div style="font-family: 'Roboto Mono', monospace; font-size: 12px; font-weight: 500; margin-bottom: 6px; color: rgba(255,255,255,0.7)">${time}</div>`;
+          for (const p of params) {
+            const val = p.value;
+            if (val == null || val === 0) continue;
+            let formatted;
+            if (p.seriesName === 'Verkoopprijs') {
+              formatted = `${val.toFixed(1)} \u20acc/kWh`;
+            } else {
+              formatted = viewMode === '€' ? `\u20ac ${val.toFixed(3)}` : `${val.toFixed(3)} kWh`;
+            }
+            html += `<div style="display: flex; align-items: center; gap: 6px; margin: 3px 0; color: #fff">`;
+            html += `<span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: ${p.color}"></span>`;
+            html += `<span style="flex: 1; color: rgba(255,255,255,0.8)">${p.seriesName}</span>`;
+            html += `<span style="font-weight: 600; color: #fff">${formatted}</span>`;
+            html += `</div>`;
+          }
+          return html;
+        },
+      },
+      legend: { show: false },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { interval: resolution === 'kwartier' ? 3 : 2, fontSize: 11 },
+        splitLine: { show: false },
+      },
+      yAxis: [
+        { type: 'value', name: unitLabel, splitLine: { lineStyle: { type: 'dashed', color: '#e0e0e0' } } },
+        ...(viewMode === 'kWh' ? [{ type: 'value', name: '\u20acc/kWh', splitLine: { show: false } }] : []),
+      ],
+      series: [
+        {
+          name: 'Eigenverbruik', type: 'bar', stack: 'production', yAxisIndex: 0,
+          itemStyle: { color: colors.selfConsumed },
+          barMaxWidth: barWidth,
+          data: displayData.map((d) => d.directUse > 0 ? d.directUse : null),
+        },
+        {
+          name: 'Teruggeleverd', type: 'bar', stack: 'production', yAxisIndex: 0,
+          itemStyle: { color: colors.exported },
+          barMaxWidth: barWidth,
+          data: displayData.map((d) => d.returned > 0 ? d.returned : null),
+        },
+        {
+          name: 'Opgeslagen', type: 'bar', stack: 'production', yAxisIndex: 0,
+          itemStyle: { color: colors.battery, borderRadius: [2, 2, 0, 0] },
+          barMaxWidth: barWidth,
+          data: displayData.map((d) => d.battery > 0 ? d.battery : null),
+        },
+        ...(hasBattery ? [
+          {
+            name: 'Batterij \u2192 huis', type: 'bar', stack: 'battery', yAxisIndex: 0,
+            itemStyle: { color: '#29B6F6' },
+            barMaxWidth: barWidth,
+            data: displayData.map((d) => d.battHome > 0 ? d.battHome : null),
+          },
+          {
+            name: 'Batterij \u2192 net', type: 'bar', stack: 'battery', yAxisIndex: 0,
+            itemStyle: { color: colors.batteryExported || '#7E57C2', borderRadius: [2, 2, 0, 0] },
+            barMaxWidth: barWidth,
+            data: displayData.map((d) => d.battGrid > 0 ? d.battGrid : null),
+          },
+        ] : []),
+        {
+          name: 'Forecast', type: 'line', yAxisIndex: 0,
+          lineStyle: { type: 'dashed', color: colors.solar, width: 1.5 },
+          areaStyle: { color: colors.solar, opacity: 0.12 },
+          itemStyle: { color: colors.solar },
+          showSymbol: false, connectNulls: true,
+          data: displayData.map((d) => d.forecast),
+        },
+        ...(viewMode === 'kWh' ? [{
+          name: 'Verkoopprijs', type: 'line', step: 'end', yAxisIndex: 1,
+          lineStyle: { color: colors.warning, width: 1.5 },
+          itemStyle: { color: colors.warning },
+          showSymbol: false, connectNulls: true,
+          data: displayData.map((d) => d.sellingPrice),
+        }] : []),
+      ],
+    };
+  }, [displayData, colors, viewMode, unitLabel, resolution, hasBattery]);
+
+  // Pie chart: year totals
   const pieData = useMemo(() => {
     const slices = [
       { key: 'selfConsumed', label: 'Direct verbruik', entity: 'sensor.ec_self_consumed_energy_year', color: colors.selfConsumed },
       { key: 'exported', label: 'Teruggeleverd', entity: 'sensor.ec_exported_energy_year', color: colors.exported },
-      { key: 'selfStored', label: 'Opgeslagen in batterij', entity: 'sensor.ec_self_stored_energy_year', color: colors.battery },
-      { key: 'battSelfConsumed', label: 'Batterij → huis', entity: 'sensor.ec_self_consumed_battery_energy_year', color: '#29B6F6' },
-      { key: 'battExported', label: 'Batterij → net', entity: 'sensor.ec_exported_battery_energy_year', color: colors.batteryExported },
+      { key: 'selfStored', label: 'Opgeslagen', entity: 'sensor.ec_self_stored_energy_year', color: colors.battery },
+      { key: 'battHome', label: 'Batterij \u2192 huis', entity: 'sensor.ec_self_consumed_battery_energy_year', color: '#29B6F6' },
+      { key: 'battGrid', label: 'Batterij \u2192 net', entity: 'sensor.ec_exported_battery_energy_year', color: colors.batteryExported || '#7E57C2' },
     ];
-
     const data = [];
     let total = 0;
-
     for (const s of slices) {
       const val = readEntityFloat(hass, s.entity);
       if (val != null && val > 0) {
-        data.push({ name: s.label, value: val, color: s.color, key: s.key });
+        data.push({ name: s.label, value: parseFloat(val.toFixed(1)), color: s.color });
         total += val;
       }
     }
-
-    // For € mode: multiply by average price (simplified)
-    if (unit === 'euro' && data.length > 0) {
-      const avgPurchase = hass?.states?.[entities.purchasePrice]
-        ? parseFloat(hass.states[entities.purchasePrice].state) || 0 : 0;
-      const avgSelling = hass?.states?.[entities.sellingPrice]
-        ? parseFloat(hass.states[entities.sellingPrice].state) || 0 : 0;
-
-      let euroTotal = 0;
-      for (const d of data) {
-        // Self-consumed / battery→home → saves purchase price
-        if (d.key === 'selfConsumed' || d.key === 'battSelfConsumed' || d.key === 'selfStored') {
-          d.value = d.value * avgPurchase;
-        } else {
-          // Exported / battery→net → earns selling price
-          d.value = d.value * avgSelling;
-        }
-        euroTotal += d.value;
-      }
-      return { data, total: euroTotal };
-    }
-
     return { data, total };
-  }, [hass, entities, colors, unit]);
+  }, [hass, colors]);
 
-  // Contract comparison data
+  // Contract comparison
   const contractData = useMemo(() => {
     const contractType = hass?.states?.['select.ep_electricity_contract_type']?.state;
     const netCostsYear = readEntityFloat(hass, 'sensor.ep_net_energy_costs_year');
-    // For now we only show current costs — shadow costs need EP module update
-    return { contractType, netCostsYear, shadowAvailable: false };
+    return { contractType, netCostsYear };
   }, [hass]);
 
-  const nowMs = Date.now();
-  const yLabel = unit === 'euro' ? '€' : 'W';
-  const tooltipFormatter = (value, name) => {
-    if (value == null) return ['—', name];
-    if (unit === 'euro') return [`€${value.toFixed(4)}`, name];
-    return [`${Math.round(value)} W`, name];
-  };
+  const statusColors = { green: '#16a34a', orange: '#ea580c', yellow: '#d97706', red: '#dc2626', gray: '#9ca3af' };
 
-  const barSize = resolution === 'uur' ? 20 : 3;
-  const hasBattery = rawChartData.some((s) => s.selfStored != null || s.battSelfConsumed != null || s.battExported != null);
+  const kpiStyle = (dark) => ({
+    padding: '10px 14px', borderRadius: '8px',
+    background: dark ? '#212121' : '#fff',
+    border: dark ? 'none' : `1px solid ${colors.border}`,
+    minWidth: '100px', flex: '1 1 100px',
+  });
+
+  const kpiLabelStyle = (dark) => ({
+    fontSize: '12px',
+    color: dark ? 'rgba(255,255,255,0.7)' : colors.textLight,
+    marginBottom: '2px',
+    fontWeight: 500,
+    fontFamily: fonts.body,
+  });
+
+  const kpiValueStyle = (dark) => ({
+    fontSize: '18px',
+    fontWeight: 600,
+    fontFamily: fonts.data,
+    color: dark ? '#EEFF41' : colors.text,
+  });
+
+  const toggleBtn = (active, isRed) => ({
+    padding: '6px 0',
+    width: '80px',
+    fontSize: '12px',
+    fontFamily: fonts.body,
+    fontWeight: active ? 600 : 400,
+    border: `1px solid ${isRed ? '#dc2626' : colors.border}`,
+    background: active ? colors.text : '#fff',
+    color: active ? '#fff' : (isRed ? '#dc2626' : colors.textLight),
+    borderRadius: '4px',
+    cursor: isRed ? 'not-allowed' : 'pointer',
+    transition: 'all 0.15s',
+    textAlign: 'center',
+  });
 
   return (
     <div>
-      {/* Section title */}
-      <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>
-        Productie vandaag
-      </h2>
+      {/* Section: Productie vandaag */}
+      <div style={{ fontSize: '16px', fontWeight: 600, fontFamily: fonts.body, color: colors.text, marginBottom: '12px' }}>Productie vandaag</div>
 
-      {/* Toggle row */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
-        <div style={toggleGroupStyle}>
-          <button
-            style={toggleBtnStyle(resolution === 'kwartier', kwartierDisabled)}
-            onClick={() => !kwartierDisabled && setResolution('kwartier')}
-            title={kwartierDisabled ? 'Prijsdata is alleen per uur beschikbaar' : 'Toon per kwartier'}
-          >
-            Kwartier
-          </button>
-          <button
-            style={toggleBtnStyle(resolution === 'uur', false)}
-            onClick={() => setResolution('uur')}
-          >
-            Uur
-          </button>
+      {/* KPIs + Config */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', flex: 1 }}>
+          {[
+            { label: 'Productie', value: `${kpis.totalProduced} kWh`, dark: false },
+            { label: 'Forecast', value: `${kpis.forecastTotal} kWh`, dark: false },
+            { label: 'Direct use', value: `${kpis.totalDirectUse} kWh`, dark: true },
+            { label: 'Opbrengst', value: `\u20ac ${kpis.sellRevenue}`, dark: true },
+            { label: 'CO\u2082 vermeden', value: `${kpis.emissionsAvoided} kg`, dark: true },
+          ].map((kpi) => (
+            <div key={kpi.label} style={kpiStyle(kpi.dark)}>
+              <div style={kpiLabelStyle(kpi.dark)}>{kpi.label}</div>
+              <div style={kpiValueStyle(kpi.dark)}>{kpi.value}</div>
+            </div>
+          ))}
         </div>
-        <div style={toggleGroupStyle}>
-          <button style={toggleBtnStyle(unit === 'wh', false)} onClick={() => setUnit('wh')}>Wh</button>
-          <button style={toggleBtnStyle(unit === 'euro', false)} onClick={() => setUnit('euro')}>€</button>
+        <div ref={configRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            style={{
+              width: '36px', height: '36px', borderRadius: '8px',
+              border: `1px solid ${colors.border}`, background: showConfig ? colors.text : '#fff',
+              color: showConfig ? '#fff' : colors.textLight,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <span style={matIcon}>tune</span>
+          </button>
+          {showConfig && (
+            <div style={{
+              position: 'absolute', top: '42px', right: 0, zIndex: 100,
+              background: '#fff', borderRadius: '8px', border: `1px solid ${colors.border}`,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.12)', padding: '12px',
+              display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '176px',
+            }}>
+              <div style={{ fontSize: '11px', color: colors.textLight, fontFamily: fonts.body, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Resolutie</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button style={toggleBtn(resolution === 'uur', false)} onClick={() => { setResolution('uur'); setHistoryData(null); }}>Uur</button>
+                <button style={toggleBtn(resolution === 'kwartier', viewMode === '€' && !hasQuarterPrices)} onClick={() => { if (viewMode !== '€' || hasQuarterPrices) { setResolution('kwartier'); setHistoryData(null); } }}>Kwartier</button>
+              </div>
+              <div style={{ fontSize: '11px', color: colors.textLight, fontFamily: fonts.body, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>Weergave</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button style={toggleBtn(viewMode === 'kWh', false)} onClick={() => setViewMode('kWh')}>Wh</button>
+                <button style={toggleBtn(viewMode === '€', false)} onClick={() => setViewMode('€')}>{'\u20ac'}</button>
+              </div>
+              {viewMode === '€' && !hasQuarterPrices && resolution === 'uur' && (
+                <div style={{ fontSize: '10px', color: '#dc2626', fontFamily: fonts.body }}>Kwartierprijzen niet beschikbaar</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* KPIs */}
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {[
-          { label: 'Productie', value: `${kpis.totalProduced} kWh`, color: colors.solar },
-          { label: 'Eigenverbruik', value: `${kpis.totalSelfConsumed} kWh`, color: colors.selfConsumed },
-          { label: 'Teruggeleverd', value: `${kpis.totalExported} kWh`, color: colors.exported },
-          { label: 'Piek', value: `${kpis.peakW} W`, color: colors.solar },
-          { label: 'Eigenverbruik %', value: `${kpis.selfSuffPct}%`, color: colors.selfConsumed },
-          ...(hasBattery ? [
-            { label: 'Opgeslagen', value: `${kpis.totalSelfStored} kWh`, color: colors.battery },
-            { label: 'Batterij → huis', value: `${kpis.totalBattSelf} kWh`, color: '#29B6F6' },
-            { label: 'Batterij → net', value: `${kpis.totalBattExported} kWh`, color: colors.batteryExported },
-          ] : []),
-        ].map((kpi) => (
-          <div key={kpi.label} style={{
-            padding: '10px 14px', borderRadius: '8px',
-            background: '#fff', border: `1px solid ${colors.border}`,
-            minWidth: '100px',
-          }}>
-            <div style={{ fontSize: '11px', color: colors.textLight, marginBottom: '4px' }}>{kpi.label}</div>
-            <div style={{ fontSize: '18px', fontWeight: 600, color: kpi.color }}>{kpi.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Main chart */}
-      <ResponsiveContainer width="100%" height={400}>
-        <ComposedChart data={displayData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-          <XAxis
-            dataKey="timestamp"
-            type="number"
-            domain={['dataMin', 'dataMax']}
-            tickFormatter={formatTime}
-            tick={{ fontSize: 11, fill: colors.textLight }}
-          />
-          <YAxis
-            tick={{ fontSize: 11, fill: colors.textLight }}
-            label={{ value: yLabel, position: 'insideTopLeft', offset: -5, style: { fontSize: 11 } }}
-          />
-          <Tooltip labelFormatter={formatTime} formatter={tooltipFormatter} />
-          <Legend />
-
-          {/* Forecast area */}
-          <Area
-            dataKey="forecast" name="Forecast"
-            fill={colors.solarLight} fillOpacity={0.2}
-            stroke={colors.solarLight} strokeDasharray="5 5" strokeWidth={1.5}
-            connectNulls
-          />
-
-          {/* Stacked bars: solar production breakdown */}
-          <Bar dataKey="selfConsumed" name="Eigenverbruik" stackId="prod" fill={colors.selfConsumed} fillOpacity={0.7} barSize={barSize} />
-          <Bar dataKey="exported" name="Teruggeleverd" stackId="prod" fill={colors.exported} fillOpacity={0.7} barSize={barSize} />
-          {hasBattery && (
-            <Bar dataKey="selfStored" name="Opgeslagen in batterij" stackId="prod" fill={colors.battery} fillOpacity={0.7} barSize={barSize} />
-          )}
-          {/* Stacked bars: battery discharge */}
-          {hasBattery && (
-            <Bar dataKey="battSelfConsumed" name="Batterij → huis" stackId="batt" fill="#29B6F6" fillOpacity={0.7} barSize={barSize} />
-          )}
-          {hasBattery && (
-            <Bar dataKey="battExported" name="Batterij → net" stackId="batt" fill={colors.batteryExported} fillOpacity={0.7} barSize={barSize} />
-          )}
-
-          <ReferenceLine
-            x={resolution === 'uur' ? toHourKey(nowMs) : toSlotKey(nowMs)}
-            stroke="#999" strokeDasharray="3 3"
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
+      {/* Chart */}
+      <ReactECharts option={chartOption} theme="samba" style={{ height: 400 }} notMerge={true} />
 
       {/* Pie chart: Energy distribution year */}
       {pieData.data.length > 0 && (
-        <div style={{ marginTop: '32px' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>
-            Energieverdeling zonnesysteem
-          </h2>
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ fontSize: '16px', fontWeight: 600, fontFamily: fonts.body, color: colors.text, marginBottom: '12px' }}>Energieverdeling zonnesysteem</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
-            <ResponsiveContainer width={280} height={280}>
-              <PieChart>
-                <Pie
-                  data={pieData.data}
-                  cx="50%" cy="50%"
-                  innerRadius={70} outerRadius={110}
-                  dataKey="value"
-                  paddingAngle={2}
-                >
-                  {pieData.data.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value) => unit === 'euro'
-                    ? `€${value.toFixed(2)}`
-                    : `${value.toFixed(1)} kWh`
-                  }
-                />
-                {/* Center label */}
-                <text x="50%" y="46%" textAnchor="middle" dominantBaseline="middle"
-                  style={{ fontSize: '20px', fontWeight: 600, fill: '#1a1a1a' }}>
-                  {unit === 'euro'
-                    ? `€${pieData.total.toFixed(0)}`
-                    : `${pieData.total.toFixed(0)} kWh`
-                  }
-                </text>
-                <text x="50%" y="58%" textAnchor="middle" dominantBaseline="middle"
-                  style={{ fontSize: '11px', fill: '#6b7280' }}>
-                  dit jaar
-                </text>
-              </PieChart>
-            </ResponsiveContainer>
-
-            {/* Legend */}
+            <div style={{ width: '220px', height: '220px', position: 'relative' }}>
+              <ReactECharts
+                option={{
+                  series: [{
+                    type: 'pie',
+                    radius: ['55%', '80%'],
+                    data: pieData.data.map((d) => ({ value: d.value, name: d.name, itemStyle: { color: d.color } })),
+                    label: { show: false },
+                    emphasis: { label: { show: false } },
+                    padAngle: 2,
+                  }],
+                  tooltip: {
+                    formatter: (p) => `${p.name}: ${viewMode === '€' ? `\u20ac${p.value.toFixed(2)}` : `${p.value.toFixed(1)} kWh`}`,
+                  },
+                  graphic: [{
+                    type: 'text',
+                    left: 'center', top: '42%',
+                    style: { text: `${pieData.total.toFixed(0)} kWh`, fontSize: 18, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", fill: colors.text, textAlign: 'center' },
+                  }, {
+                    type: 'text',
+                    left: 'center', top: '54%',
+                    style: { text: 'dit jaar', fontSize: 11, fill: colors.textLight, textAlign: 'center' },
+                  }],
+                }}
+                style={{ height: '220px', width: '220px' }}
+                notMerge={true}
+              />
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {pieData.data.map((entry) => (
                 <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: entry.color, flexShrink: 0 }} />
                   <div>
-                    <div style={{ fontSize: '12px', color: colors.text, fontWeight: 500 }}>{entry.name}</div>
-                    <div style={{ fontSize: '11px', color: colors.textLight }}>
-                      {unit === 'euro'
-                        ? `€${entry.value.toFixed(2)}`
-                        : `${entry.value.toFixed(1)} kWh`
-                      }
-                    </div>
+                    <div style={{ fontSize: '12px', color: colors.text, fontWeight: 500, fontFamily: fonts.body }}>{entry.name}</div>
+                    <div style={{ fontSize: '11px', color: colors.textLight, fontFamily: fonts.data }}>{entry.value.toFixed(1)} kWh</div>
                   </div>
                 </div>
               ))}
@@ -576,82 +613,68 @@ export default function ProductionTodayChart({ hass, entities, colors, solarEnti
       )}
 
       {/* Contract comparison */}
-      <div style={{ marginTop: '32px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>
-          Vergelijking contracttype
-        </h2>
-        {contractData.netCostsYear != null ? (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-              <div style={{ fontSize: '13px', color: colors.text, width: '140px' }}>
-                {contractData.contractType === 'Dynamic' ? 'Dynamisch' : 'Vast'} (huidig)
-              </div>
-              <div style={{ flex: 1, position: 'relative', height: '28px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{
-                  width: '100%', height: '100%',
-                  background: contractData.netCostsYear >= 0 ? colors.warning : colors.selfConsumed,
-                  opacity: 0.7, borderRadius: '4px',
-                }} />
-                <span style={{
-                  position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)',
-                  fontSize: '12px', fontWeight: 600, color: '#1a1a1a',
-                }}>
-                  €{contractData.netCostsYear.toFixed(2)}
-                </span>
-              </div>
+      {contractData.netCostsYear != null && (
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ fontSize: '16px', fontWeight: 600, fontFamily: fonts.body, color: colors.text, marginBottom: '12px' }}>Vergelijking contracttype</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <div style={{ fontSize: '13px', color: colors.text, width: '140px', fontFamily: fonts.body }}>
+              {contractData.contractType === 'Dynamic' ? 'Dynamisch' : 'Vast'} (huidig)
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ fontSize: '13px', color: colors.textLight, width: '140px' }}>
-                {contractData.contractType === 'Dynamic' ? 'Vast' : 'Dynamisch'} (alternatief)
-              </div>
+            <div style={{ flex: 1, position: 'relative', height: '28px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
               <div style={{
-                flex: 1, height: '28px', background: '#f3f4f6', borderRadius: '4px',
-                display: 'flex', alignItems: 'center', paddingLeft: '8px',
+                width: '100%', height: '100%',
+                background: contractData.netCostsYear >= 0 ? colors.warning : colors.selfConsumed,
+                opacity: 0.7, borderRadius: '4px',
+              }} />
+              <span style={{
+                position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)',
+                fontSize: '12px', fontWeight: 600, fontFamily: fonts.data, color: colors.text,
               }}>
-                <span style={{ fontSize: '11px', color: colors.textLight, fontStyle: 'italic' }}>
-                  Beschikbaar na update energy-pricing module
-                </span>
-              </div>
+                {'\u20ac'}{contractData.netCostsYear.toFixed(2)}
+              </span>
             </div>
           </div>
-        ) : (
-          <div style={{ color: '#9ca3af', fontSize: '13px' }}>
-            Geen kostendata beschikbaar (sensor ep_net_energy_costs_year)
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '13px', color: colors.textLight, width: '140px', fontFamily: fonts.body }}>
+              {contractData.contractType === 'Dynamic' ? 'Vast' : 'Dynamisch'} (alternatief)
+            </div>
+            <div style={{
+              flex: 1, height: '28px', background: '#f3f4f6', borderRadius: '4px',
+              display: 'flex', alignItems: 'center', paddingLeft: '8px',
+            }}>
+              <span style={{ fontSize: '11px', color: colors.textLight, fontStyle: 'italic', fontFamily: fonts.body }}>
+                Beschikbaar na update energy-pricing module
+              </span>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Status rapport */}
-      <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a1a', margin: '32px 0 12px' }}>
-        Status rapport
-      </h2>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-        <thead>
-          <tr style={{ borderBottom: `2px solid ${colors.border}` }}>
-            <th style={{ width: '12px', padding: '8px 6px 8px 0', textAlign: 'left' }}></th>
-            <th style={{ padding: '8px 12px', textAlign: 'left', color: colors.textLight, fontWeight: 600, fontSize: '12px' }}>Status</th>
-            <th style={{ padding: '8px 12px', textAlign: 'left', color: colors.textLight, fontWeight: 600, fontSize: '12px' }}>Onderdeel</th>
-            <th style={{ padding: '8px 12px', textAlign: 'left', color: colors.textLight, fontWeight: 600, fontSize: '12px' }}>Bijzonderheden</th>
-          </tr>
-        </thead>
-        <tbody>
-          {systemStatus.map((item, i) => (
-            <tr key={i} style={{ borderBottom: `1px solid ${colors.border}` }}>
-              <td style={{ width: '12px', padding: '8px 6px 8px 0' }}>
-                <div style={{
-                  width: '8px', height: '8px', borderRadius: '50%',
-                  backgroundColor: STATUS_DOT[item.status] || '#9ca3af',
-                }} />
-              </td>
-              <td style={{ padding: '8px 12px', color: colors.text, fontWeight: 500 }}>
-                {item.status === 'ok' ? 'OK' : item.status === 'warning' ? 'Waarschuwing' : 'Fout'}
-              </td>
-              <td style={{ padding: '8px 12px', color: colors.text }}>{item.onderdeel}</td>
-              <td style={{ padding: '8px 12px', color: colors.textLight }}>{item.bijzonderheden}</td>
+      {/* Section: Status rapport */}
+      <div style={{ fontSize: '16px', fontWeight: 600, fontFamily: fonts.body, color: colors.text, marginTop: '24px', marginBottom: '12px' }}>Status rapport</div>
+
+      <div style={{ padding: '16px', borderRadius: '8px', background: '#fff', border: `1px solid ${colors.border}` }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: fonts.body }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${colors.border}` }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px', fontSize: '11px', fontWeight: 600, color: colors.textLight, textTransform: 'uppercase', letterSpacing: '0.5px', width: '30px' }}>Status</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', fontSize: '11px', fontWeight: 600, color: colors.textLight, textTransform: 'uppercase', letterSpacing: '0.5px', width: '130px' }}>Onderdeel</th>
+              <th style={{ textAlign: 'left', padding: '6px 0 6px 8px', fontSize: '11px', fontWeight: 600, color: colors.textLight, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bijzonderheden</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {statusItems.map((item) => (
+              <tr key={item.label} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                <td style={{ padding: '10px 8px', verticalAlign: 'top' }}>
+                  <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: statusColors[item.status] }} />
+                </td>
+                <td style={{ padding: '10px 8px', fontSize: '13px', fontWeight: 600, color: colors.text, verticalAlign: 'top' }}>{item.label}</td>
+                <td style={{ padding: '10px 0 10px 8px', fontSize: '12px', color: colors.textLight }}>{item.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
